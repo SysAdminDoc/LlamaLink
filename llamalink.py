@@ -1,12 +1,13 @@
 """
-LlamaLink v0.2.0 - GUI Frontend for llama.cpp
+LlamaLink v0.3.0 - GUI Frontend for llama.cpp
 A simple, versatile chat interface for local LLMs via llama-server.
 """
 
-import sys, os, subprocess, json, re, time
+import sys, os, subprocess, json, re, time, hashlib
+from pathlib import Path
 
 APP_NAME = "LlamaLink"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 def _bootstrap():
     """Auto-install dependencies before imports."""
@@ -34,7 +35,8 @@ from PyQt6.QtWidgets import (
     QSplitter, QTextEdit, QLineEdit, QPushButton, QLabel, QComboBox,
     QFileDialog, QGroupBox, QSlider, QSpinBox, QCheckBox, QTabWidget,
     QListWidget, QListWidgetItem, QStatusBar, QPlainTextEdit,
-    QSizePolicy, QScrollArea, QFrame
+    QSizePolicy, QScrollArea, QFrame, QProgressBar, QTreeWidget,
+    QTreeWidgetItem, QHeaderView, QAbstractItemView
 )
 from PyQt6.QtCore import (
     Qt, QThread, pyqtSignal, QTimer, QSettings, QSize
@@ -324,6 +326,50 @@ QScrollBar::handle:horizontal:hover {{
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0;
 }}
+QProgressBar {{
+    background: {CAT['surface0']};
+    border: 1px solid {CAT['surface1']};
+    border-radius: 6px;
+    height: 18px;
+    text-align: center;
+    color: {CAT['crust']};
+    font-size: 11px;
+    font-weight: bold;
+}}
+QProgressBar::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {CAT['blue']}, stop:1 {CAT['sapphire']});
+    border-radius: 5px;
+}}
+QTreeWidget {{
+    background-color: {CAT['mantle']};
+    color: {CAT['text']};
+    border: 1px solid {CAT['surface1']};
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+    alternate-background-color: {CAT['base']};
+}}
+QTreeWidget::item {{
+    padding: 4px 6px;
+    border-radius: 4px;
+}}
+QTreeWidget::item:selected {{
+    background-color: {CAT['surface1']};
+    color: {CAT['lavender']};
+}}
+QTreeWidget::item:hover:!selected {{
+    background-color: {CAT['surface0']};
+}}
+QHeaderView::section {{
+    background-color: {CAT['surface0']};
+    color: {CAT['subtext1']};
+    border: none;
+    border-right: 1px solid {CAT['surface1']};
+    padding: 6px 8px;
+    font-weight: bold;
+    font-size: 11px;
+}}
 """
 
 
@@ -499,6 +545,163 @@ class ServerManager(QThread):
         self.server_stopped.emit()
 
 
+# ── HuggingFace API workers ───────────────────────────────────────────────
+HF_API = "https://huggingface.co/api"
+
+def _hf_headers():
+    """Return auth headers if HF token is available."""
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+def _parse_quant(filename):
+    """Extract quantization type from a GGUF filename (e.g. Q4_K_M, IQ3_S)."""
+    m = re.search(r"[.-]((?:I?Q\d[\w_]*?))[.-]", filename, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"[.-]((?:I?Q\d[\w_]*))\.", filename, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r"((?:I?Q\d[\w_]*))", filename, re.IGNORECASE)
+    return m.group(1).upper() if m else ""
+
+
+class HFSearchWorker(QThread):
+    results_ready = pyqtSignal(list)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, query, sort="downloads", limit=25):
+        super().__init__()
+        self.query = query
+        self.sort = sort
+        self.limit = limit
+
+    def run(self):
+        try:
+            params = {
+                "search": self.query,
+                "filter": "gguf",
+                "sort": self.sort,
+                "direction": "-1",
+                "limit": self.limit,
+            }
+            resp = requests.get(f"{HF_API}/models", params=params,
+                                headers=_hf_headers(), timeout=15)
+            resp.raise_for_status()
+            models = resp.json()
+            results = []
+            for m in models:
+                results.append({
+                    "id": m.get("id", ""),
+                    "author": m.get("id", "").split("/")[0] if "/" in m.get("id", "") else "",
+                    "name": m.get("id", "").split("/")[-1],
+                    "downloads": m.get("downloads", 0),
+                    "likes": m.get("likes", 0),
+                    "tags": m.get("tags", []),
+                    "last_modified": m.get("lastModified", ""),
+                })
+            self.results_ready.emit(results)
+        except requests.exceptions.HTTPError as e:
+            self.error_occurred.emit(f"HuggingFace API error: HTTP {e.response.status_code}")
+        except Exception as e:
+            self.error_occurred.emit(f"Search failed: {e}")
+
+
+class HFFilesWorker(QThread):
+    files_ready = pyqtSignal(str, list)  # repo_id, files
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, repo_id):
+        super().__init__()
+        self.repo_id = repo_id
+
+    def run(self):
+        try:
+            resp = requests.get(f"{HF_API}/models/{self.repo_id}",
+                                headers=_hf_headers(), timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            siblings = data.get("siblings", [])
+            gguf_files = []
+            for s in siblings:
+                fname = s.get("rfilename", "")
+                if not fname.lower().endswith(".gguf"):
+                    continue
+                size = s.get("size")
+                # Try to get size from LFS info if not directly available
+                if not size:
+                    lfs = s.get("lfs")
+                    if lfs:
+                        size = lfs.get("size")
+                gguf_files.append({
+                    "filename": fname,
+                    "size": size or 0,
+                    "quant": _parse_quant(fname),
+                })
+            gguf_files.sort(key=lambda x: x["size"])
+            self.files_ready.emit(self.repo_id, gguf_files)
+        except Exception as e:
+            self.error_occurred.emit(f"Failed to fetch files: {e}")
+
+
+class HFDownloadWorker(QThread):
+    progress = pyqtSignal(int, int)  # downloaded_bytes, total_bytes
+    finished = pyqtSignal(str)  # saved file path
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, repo_id, filename, dest_folder):
+        super().__init__()
+        self.repo_id = repo_id
+        self.filename = filename
+        self.dest_folder = dest_folder
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        url = f"https://huggingface.co/{self.repo_id}/resolve/main/{self.filename}"
+        dest = os.path.join(self.dest_folder, self.filename)
+        temp = dest + ".part"
+        try:
+            os.makedirs(self.dest_folder, exist_ok=True)
+            # Support resuming partial downloads
+            downloaded = 0
+            headers = _hf_headers()
+            if os.path.exists(temp):
+                downloaded = os.path.getsize(temp)
+                headers["Range"] = f"bytes={downloaded}-"
+
+            resp = requests.get(url, headers=headers, stream=True, timeout=30)
+
+            if resp.status_code == 416:
+                # Range not satisfiable = file already complete
+                if os.path.exists(temp):
+                    os.replace(temp, dest)
+                    self.finished.emit(dest)
+                    return
+
+            resp.raise_for_status()
+
+            total = int(resp.headers.get("content-length", 0)) + downloaded
+            mode = "ab" if downloaded > 0 else "wb"
+
+            with open(temp, mode) as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if self._stop:
+                        return
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    self.progress.emit(downloaded, total)
+
+            os.replace(temp, dest)
+            self.finished.emit(dest)
+        except Exception as e:
+            self.error_occurred.emit(f"Download failed: {e}")
+
+
 # ── Utilities ─────────────────────────────────────────────────────────────
 def scan_models(folder):
     """Recursively find all .gguf files in a folder."""
@@ -582,6 +785,11 @@ class LlamaLinkWindow(QMainWindow):
         self._stream_start_time = 0.0
         self._current_chat_file = None
         self._server_managed = False  # True = we started it, False = external
+        self._hf_search_worker = None
+        self._hf_files_worker = None
+        self._hf_download_worker = None
+        self._hf_selected_repo = None
+        self._hf_cached_results = []
 
         self._build_ui()
         self._load_settings()
@@ -879,6 +1087,116 @@ class LlamaLinkWindow(QMainWindow):
         chat_layout.addLayout(ctrl_row)
 
         tabs.addTab(chat_widget, "Chat")
+
+        # ── Download Models tab ──────────────────────────────────────────
+        dl_widget = QWidget()
+        dl_layout = QVBoxLayout(dl_widget)
+        dl_layout.setContentsMargins(8, 8, 8, 8)
+        dl_layout.setSpacing(8)
+
+        # Search bar
+        search_row = QHBoxLayout()
+        self.hf_search_edit = QLineEdit()
+        self.hf_search_edit.setPlaceholderText("Search HuggingFace for GGUF models (e.g. llama, mistral, qwen)...")
+        self.hf_search_edit.setFont(QFont("Segoe UI", 12))
+        self.hf_search_edit.returnPressed.connect(self._hf_search)
+        self.hf_search_btn = QPushButton("Search")
+        self.hf_search_btn.setObjectName("sendBtn")
+        self.hf_search_btn.setMinimumHeight(36)
+        self.hf_search_btn.clicked.connect(self._hf_search)
+        search_row.addWidget(self.hf_search_edit, 1)
+        search_row.addWidget(self.hf_search_btn)
+        dl_layout.addLayout(search_row)
+
+        # Sort + result count
+        sort_row = QHBoxLayout()
+        sort_row.addWidget(QLabel("Sort by:"))
+        self.hf_sort_combo = QComboBox()
+        self.hf_sort_combo.addItem("Most Downloads", "downloads")
+        self.hf_sort_combo.addItem("Most Likes", "likes")
+        self.hf_sort_combo.addItem("Recently Updated", "lastModified")
+        self.hf_sort_combo.addItem("Trending", "trending_score")
+        self.hf_sort_combo.currentIndexChanged.connect(lambda _: self._hf_search() if self.hf_search_edit.text().strip() else None)
+        sort_row.addWidget(self.hf_sort_combo)
+        sort_row.addStretch()
+        self.hf_result_count = QLabel("")
+        self.hf_result_count.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+        sort_row.addWidget(self.hf_result_count)
+        dl_layout.addLayout(sort_row)
+
+        # Results split: model list (top) and files (bottom)
+        dl_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Model results tree
+        self.hf_model_tree = QTreeWidget()
+        self.hf_model_tree.setHeaderLabels(["Model", "Author", "Downloads", "Likes"])
+        self.hf_model_tree.setAlternatingRowColors(True)
+        self.hf_model_tree.setRootIsDecorated(False)
+        self.hf_model_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        header = self.hf_model_tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.hf_model_tree.itemClicked.connect(self._hf_on_model_clicked)
+        dl_splitter.addWidget(self.hf_model_tree)
+
+        # File list + download area
+        files_panel = QWidget()
+        files_layout = QVBoxLayout(files_panel)
+        files_layout.setContentsMargins(0, 0, 0, 0)
+        files_layout.setSpacing(6)
+
+        self.hf_files_label = QLabel("Select a model above to see available GGUF files")
+        self.hf_files_label.setStyleSheet(f"color: {CAT['subtext0']}; font-style: italic;")
+        files_layout.addWidget(self.hf_files_label)
+
+        self.hf_files_tree = QTreeWidget()
+        self.hf_files_tree.setHeaderLabels(["Filename", "Quant", "Size"])
+        self.hf_files_tree.setAlternatingRowColors(True)
+        self.hf_files_tree.setRootIsDecorated(False)
+        fheader = self.hf_files_tree.header()
+        fheader.setStretchLastSection(False)
+        fheader.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        fheader.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        fheader.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        files_layout.addWidget(self.hf_files_tree)
+
+        # Download controls
+        dl_ctrl_row = QHBoxLayout()
+        self.dl_btn = QPushButton("Download Selected")
+        self.dl_btn.setObjectName("startBtn")
+        self.dl_btn.setMinimumHeight(36)
+        self.dl_btn.clicked.connect(self._hf_download)
+        self.dl_cancel_btn = QPushButton("Cancel")
+        self.dl_cancel_btn.setObjectName("stopBtn")
+        self.dl_cancel_btn.setMinimumHeight(36)
+        self.dl_cancel_btn.setVisible(False)
+        self.dl_cancel_btn.clicked.connect(self._hf_cancel_download)
+        dl_ctrl_row.addWidget(self.dl_btn)
+        dl_ctrl_row.addWidget(self.dl_cancel_btn)
+        dl_ctrl_row.addStretch()
+        self.dl_dest_label = QLabel("")
+        self.dl_dest_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+        dl_ctrl_row.addWidget(self.dl_dest_label)
+        files_layout.addLayout(dl_ctrl_row)
+
+        # Progress bar
+        self.dl_progress = QProgressBar()
+        self.dl_progress.setVisible(False)
+        self.dl_progress.setTextVisible(True)
+        files_layout.addWidget(self.dl_progress)
+
+        self.dl_status_label = QLabel("")
+        self.dl_status_label.setStyleSheet(f"color: {CAT['subtext0']}; font-size: 11px;")
+        files_layout.addWidget(self.dl_status_label)
+
+        dl_splitter.addWidget(files_panel)
+        dl_splitter.setSizes([300, 300])
+
+        dl_layout.addWidget(dl_splitter)
+        tabs.addTab(dl_widget, "Download Models")
 
         # Server log tab
         self.server_log = QPlainTextEdit()
@@ -1345,6 +1663,201 @@ class LlamaLinkWindow(QMainWindow):
         except OSError as e:
             self.statusBar().showMessage(f"Failed to delete: {e}")
 
+    # ── HuggingFace model download ───────────────────────────────────────
+    def _hf_search(self):
+        query = self.hf_search_edit.text().strip()
+        if not query:
+            return
+        self.hf_search_btn.setEnabled(False)
+        self.hf_search_btn.setText("Searching...")
+        self.hf_model_tree.clear()
+        self.hf_files_tree.clear()
+        self.hf_result_count.setText("")
+        self.hf_files_label.setText("Select a model above to see available GGUF files")
+
+        sort_key = self.hf_sort_combo.currentData()
+        self._hf_search_worker = HFSearchWorker(query, sort=sort_key, limit=50)
+        self._hf_search_worker.results_ready.connect(self._hf_on_results)
+        self._hf_search_worker.error_occurred.connect(self._hf_on_search_error)
+        self._hf_search_worker.start()
+
+    def _hf_on_results(self, results):
+        self.hf_search_btn.setEnabled(True)
+        self.hf_search_btn.setText("Search")
+        self._hf_cached_results = results
+        self.hf_model_tree.clear()
+
+        for r in results:
+            item = QTreeWidgetItem([
+                r["name"],
+                r["author"],
+                f'{r["downloads"]:,}',
+                f'{r["likes"]:,}',
+            ])
+            item.setData(0, Qt.ItemDataRole.UserRole, r["id"])
+            item.setToolTip(0, r["id"])
+            self.hf_model_tree.addTopLevelItem(item)
+
+        self.hf_result_count.setText(f"{len(results)} model(s) found")
+        if not results:
+            self.hf_files_label.setText("No GGUF models found for this search")
+        self.statusBar().showMessage(f"Found {len(results)} GGUF model(s) on HuggingFace")
+
+    def _hf_on_search_error(self, msg):
+        self.hf_search_btn.setEnabled(True)
+        self.hf_search_btn.setText("Search")
+        self.hf_result_count.setText("")
+        self.statusBar().showMessage(msg)
+
+    def _hf_on_model_clicked(self, item):
+        repo_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if not repo_id:
+            return
+        self._hf_selected_repo = repo_id
+        self.hf_files_tree.clear()
+        self.hf_files_label.setText(f"Loading files from {repo_id}...")
+        self.dl_status_label.setText("")
+
+        self._hf_files_worker = HFFilesWorker(repo_id)
+        self._hf_files_worker.files_ready.connect(self._hf_on_files)
+        self._hf_files_worker.error_occurred.connect(self._hf_on_files_error)
+        self._hf_files_worker.start()
+
+    def _hf_on_files(self, repo_id, files):
+        self.hf_files_tree.clear()
+        if not files:
+            self.hf_files_label.setText(f"No GGUF files found in {repo_id}")
+            return
+
+        self.hf_files_label.setText(f"{repo_id}  -  {len(files)} GGUF file(s)")
+
+        for f in files:
+            size = f["size"]
+            if size > 0:
+                if size >= 1024**3:
+                    size_str = f'{size / (1024**3):.2f} GB'
+                elif size >= 1024**2:
+                    size_str = f'{size / (1024**2):.1f} MB'
+                else:
+                    size_str = f'{size / 1024:.0f} KB'
+            else:
+                size_str = "?"
+
+            item = QTreeWidgetItem([f["filename"], f["quant"], size_str])
+            item.setData(0, Qt.ItemDataRole.UserRole, f)
+            item.setToolTip(0, f["filename"])
+            self.hf_files_tree.addTopLevelItem(item)
+
+        # Update download destination label
+        dest = self.model_folder_edit.text().strip()
+        if dest:
+            self.dl_dest_label.setText(f"Downloads to: {dest}")
+        else:
+            self.dl_dest_label.setText("Set model folder in sidebar to download")
+
+    def _hf_on_files_error(self, msg):
+        self.hf_files_label.setText("Error loading files")
+        self.statusBar().showMessage(msg)
+
+    def _hf_download(self):
+        item = self.hf_files_tree.currentItem()
+        if not item:
+            self.statusBar().showMessage("Select a file to download")
+            return
+        if not self._hf_selected_repo:
+            return
+
+        dest_folder = self.model_folder_edit.text().strip()
+        if not dest_folder:
+            # Offer to pick a folder
+            dest_folder = QFileDialog.getExistingDirectory(self, "Select download folder")
+            if not dest_folder:
+                return
+            self.model_folder_edit.setText(dest_folder)
+
+        file_info = item.data(0, Qt.ItemDataRole.UserRole)
+        filename = file_info["filename"]
+        file_size = file_info["size"]
+
+        # Check if file already exists
+        dest_path = os.path.join(dest_folder, filename)
+        if os.path.isfile(dest_path):
+            existing_size = os.path.getsize(dest_path)
+            if file_size > 0 and abs(existing_size - file_size) < 1024:
+                self.dl_status_label.setText(f"Already downloaded: {filename}")
+                self.statusBar().showMessage(f"{filename} already exists in model folder")
+                return
+
+        self.dl_btn.setVisible(False)
+        self.dl_cancel_btn.setVisible(True)
+        self.dl_progress.setVisible(True)
+        self.dl_progress.setValue(0)
+        self.dl_progress.setMaximum(100)
+        self.dl_status_label.setText(f"Downloading {filename}...")
+        self._dl_start_time = time.monotonic()
+
+        self._hf_download_worker = HFDownloadWorker(self._hf_selected_repo, filename, dest_folder)
+        self._hf_download_worker.progress.connect(self._hf_on_dl_progress)
+        self._hf_download_worker.finished.connect(self._hf_on_dl_finished)
+        self._hf_download_worker.error_occurred.connect(self._hf_on_dl_error)
+        self._hf_download_worker.start()
+
+    def _hf_on_dl_progress(self, downloaded, total):
+        if total > 0:
+            pct = int(downloaded * 100 / total)
+            self.dl_progress.setValue(pct)
+            elapsed = time.monotonic() - self._dl_start_time
+            if elapsed > 0.5:
+                speed = downloaded / elapsed
+                if speed > 1024**2:
+                    speed_str = f"{speed / (1024**2):.1f} MB/s"
+                else:
+                    speed_str = f"{speed / 1024:.0f} KB/s"
+                remaining = (total - downloaded) / speed if speed > 0 else 0
+                if remaining > 60:
+                    eta = f"{remaining / 60:.0f}m {remaining % 60:.0f}s"
+                else:
+                    eta = f"{remaining:.0f}s"
+                dl_gb = downloaded / (1024**3)
+                total_gb = total / (1024**3)
+                self.dl_status_label.setText(
+                    f"{dl_gb:.2f} / {total_gb:.2f} GB  |  {speed_str}  |  ETA: {eta}"
+                )
+                self.dl_progress.setFormat(f"{pct}%  -  {speed_str}")
+        else:
+            dl_mb = downloaded / (1024**2)
+            self.dl_status_label.setText(f"Downloaded {dl_mb:.1f} MB (size unknown)")
+
+    def _hf_on_dl_finished(self, path):
+        self.dl_btn.setVisible(True)
+        self.dl_cancel_btn.setVisible(False)
+        self.dl_progress.setVisible(False)
+        elapsed = time.monotonic() - self._dl_start_time
+        size_gb = os.path.getsize(path) / (1024**3)
+        self.dl_status_label.setText(
+            f"Download complete: {os.path.basename(path)} ({size_gb:.2f} GB in {elapsed:.0f}s)"
+        )
+        self.statusBar().showMessage(f"Model downloaded: {os.path.basename(path)}")
+
+        # Refresh model list so the new model appears
+        self._refresh_models(self.model_folder_edit.text())
+
+    def _hf_on_dl_error(self, msg):
+        self.dl_btn.setVisible(True)
+        self.dl_cancel_btn.setVisible(False)
+        self.dl_progress.setVisible(False)
+        self.dl_status_label.setText(f"Download failed: {msg}")
+        self.statusBar().showMessage(msg)
+
+    def _hf_cancel_download(self):
+        if self._hf_download_worker:
+            self._hf_download_worker.stop()
+            self.dl_btn.setVisible(True)
+            self.dl_cancel_btn.setVisible(False)
+            self.dl_progress.setVisible(False)
+            self.dl_status_label.setText("Download cancelled (partial file kept for resume)")
+            self.statusBar().showMessage("Download cancelled")
+
     # ── Presets ───────────────────────────────────────────────────────────
     def _apply_preset(self, name):
         presets = {
@@ -1430,6 +1943,9 @@ class LlamaLinkWindow(QMainWindow):
         if self.chat_worker:
             self.chat_worker.stop()
             self.chat_worker.wait(2000)
+        if self._hf_download_worker:
+            self._hf_download_worker.stop()
+            self._hf_download_worker.wait(3000)
         event.accept()
 
 
