@@ -1,67 +1,67 @@
 # LlamaLink
 
 ## Overview
-GUI frontend for llama.cpp (llama-server). Single-file Python/PyQt6 app.
+GUI frontend for llama.cpp (llama-server). C# WPF/.NET 9, Catppuccin Mocha dark theme.
 
 ## Tech Stack
-- Python 3, PyQt6, requests
-- Auto-bootstraps deps via `_bootstrap()`
-- Communicates with llama-server's OpenAI-compatible API (`/v1/chat/completions`)
-- HuggingFace API for model search/download (`https://huggingface.co/api/models`)
-- Catppuccin Mocha dark theme
+- C# WPF, .NET 9, single-file self-contained exe (win-x64)
+- HttpClient for SSE streaming chat + HuggingFace API
+- System.Text.Json for serialization
+- Settings stored as JSON in `~/.llamalink/settings.json`
+- Chat history stored in `~/.llamalink/chats/`
 
-## Run
+## Build
 ```bash
-python llamalink.py
+cd src
+dotnet build                           # debug build
+dotnet publish -c Release -o ../dist   # release single-file exe
+```
+
+## Project Structure
+```
+src/
+  LlamaLink.csproj    - .NET 9 WPF project
+  App.xaml             - Catppuccin Mocha theme (colors, brushes, control styles)
+  App.xaml.cs          - Application entry point
+  MainWindow.xaml      - UI layout (3-column: config | splitter | tabs)
+  MainWindow.xaml.cs   - All application logic (~700 lines)
+assets/
+  llamalink.ico        - App icon (multi-size)
+.github/workflows/
+  build.yml            - Windows-only CI/CD (dotnet publish)
 ```
 
 ## Key Architecture
-- `ServerManager(QThread)` - Spawns and manages llama-server subprocess, captures stdout
-- `ChatWorker(QThread)` - Streams SSE responses from the API
-- `HFSearchWorker(QThread)` - Searches HuggingFace for GGUF models
-- `HFFilesWorker(QThread)` - Fetches file list for a specific HF repo
-- `HFDownloadWorker(QThread)` - Downloads GGUF files with progress, resume support
-- `LlamaLinkWindow(QMainWindow)` - Main UI with splitter layout (config left, tabs right)
-- Settings persisted via `QSettings` (Windows registry)
-- GPU auto-detection via `nvidia-smi`
-- Streaming batched at 30fps via QTimer (not per-token rebuild)
+- Server process managed directly via `System.Diagnostics.Process`
+- Server stdout/stderr read on background thread, output relayed via `Dispatcher.Invoke`
+- Chat streaming via `HttpClient.SendAsync` with `ResponseHeadersRead` + SSE line parsing
+- 30fps `DispatcherTimer` batches stream display updates (not per-token)
+- HuggingFace search/files/download all async with CancellationToken support
+- Downloads support resume via Range headers + .part files
+- ObservableCollection<ChatMessageVM> for chat display via ItemsControl + DataTemplate
 
 ## Features
-- Two modes: launch llama-server locally OR connect to an existing server
-- Browse for llama-server.exe (auto-detected from PATH / common locations)
+- Two modes: launch llama-server locally OR connect to external server
+- llama-server.exe auto-detected from PATH / common locations
 - Model folder scanning for .gguf files with size display
-- **HuggingFace model browser**: search, sort (downloads/likes/date/trending), browse GGUF files, download with progress
-- Downloads support resume (partial .part files preserved)
-- Chat interface with streaming responses and markdown rendering
-- Code blocks, inline code, bold, italic rendered in chat
+- HuggingFace model browser: search, sort, browse GGUF files, download with progress
+- Chat with SSE streaming, tokens/sec display
 - Parameter controls: temperature, top_p, top_k, repeat penalty, max tokens
 - Server params: context size, GPU layers, threads, flash attention, mlock
-- System prompt, parameter presets (Default/Creative/Precise/Code/Roleplay)
-- Server log tab with 5000 line cap
+- Presets: Default/Creative/Precise/Code/Roleplay
 - Chat history: auto-save, load, export (MD/JSON/TXT), delete
-- Tokens/sec speed display during and after generation
-- Window geometry saved/restored
-
-## Chat History
-- Stored in `~/.llamalink/chats/` as JSON files
-- Auto-saved after each assistant response and on window close
-
-## HuggingFace Integration
-- Uses public API (no token required for public models)
-- Supports `HF_TOKEN` env var for private/gated models
-- Searches filter to `gguf` tag automatically
-- Sort: downloads, likes, lastModified, trending_score
-- Downloads go to configured model folder, auto-refresh model list on completion
-- Quant type parsed from filename (Q4_K_M, IQ3_S, etc.)
+- Server log tab
 
 ## Version
+- v0.4.0 - C# WPF/.NET 9 rewrite (was Python/PyQt6)
 - v0.3.0 - HuggingFace model browser + download with progress/resume
 - v0.2.0 - Streaming perf, external server, markdown, chat history
 - v0.1.0 - Initial release
 
 ## Gotchas
-- Server readiness detection looks for "listening" in stdout
-- `CREATE_NO_WINDOW` flag used to hide server console on Windows
-- External server mode uses /health endpoint for connection check + periodic polling
-- Markdown rendering is regex-based - not a full parser
+- Server readiness detection looks for "listening" in stdout/stderr
+- WPF is Windows-only (no macOS/Linux builds)
 - HF API file sizes come from siblings array; some repos may not report sizes
+- Quant type parsed from filename via regex (Q4_K_M, IQ3_S, etc.)
+- External server mode uses /health endpoint for connection check + periodic polling
+- Chat display uses plain TextBlock (no markdown rendering) - simpler than Python version's HTML
