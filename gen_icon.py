@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Generate LlamaLink icon - a llama silhouette with a chain link motif."""
 from PIL import Image, ImageDraw, ImageFont
 import math, os

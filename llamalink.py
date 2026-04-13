@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 LlamaLink v0.3.0 - GUI Frontend for llama.cpp
 A simple, versatile chat interface for local LLMs via llama-server.
