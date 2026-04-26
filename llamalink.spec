@@ -35,6 +35,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/llamalink.ico',
+    icon='icon.ico',
     version_info=None,
 )

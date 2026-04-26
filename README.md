@@ -1,3 +1,13 @@
+<!-- codex-branding:start -->
+<p align="center"><img src="icon.png" width="128" alt="Llama Link"></p>
+
+<p align="center">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-58A6FF?style=for-the-badge">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-4ade80?style=for-the-badge">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Python%20GUI-58A6FF?style=for-the-badge">
+</p>
+<!-- codex-branding:end -->
+
 <p align="center">
   <img src="assets/icon_512.png" alt="LlamaLink" width="128">
 </p>
