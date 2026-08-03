@@ -23,6 +23,7 @@
     <Compile Include="..\..\src\ChatRegeneration.cs" Link="ChatRegeneration.cs" />
     <Compile Include="..\..\src\ChatFewShotEditor.cs" Link="ChatFewShotEditor.cs" />
     <Compile Include="..\..\src\LocalRag.cs" Link="LocalRag.cs" />
+    <Compile Include="..\..\src\WebSearch.cs" Link="WebSearch.cs" />
   </ItemGroup>
 
 </Project>

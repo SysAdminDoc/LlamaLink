@@ -327,6 +327,19 @@
                                 <CheckBox x:Name="FileReadToolCheck" Content="Read files beneath root" IsChecked="True"/>
                                 <CheckBox x:Name="CalculatorToolCheck" Content="Calculator" IsChecked="True" Margin="0,3,0,0"/>
                                 <CheckBox x:Name="PythonToolCheck" Content="Restricted Python expressions" Margin="0,3,0,0"/>
+                                <CheckBox x:Name="WebSearchToolCheck" Content="Web search (asks before network access)" Margin="0,3,0,0"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Label Content="Provider" Width="58"/>
+                                    <ComboBox x:Name="WebSearchProviderCombo" VerticalContentAlignment="Center">
+                                        <ComboBoxItem Content="DuckDuckGo" Tag="duckduckgo" IsSelected="True"/>
+                                        <ComboBoxItem Content="SearxNG proxy" Tag="searxng"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Proxy URL" Width="58"/>
+                                    <TextBox x:Name="WebSearchEndpointBox" Text="http://127.0.0.1:8080"
+                                             VerticalContentAlignment="Center" ToolTip="Used only for SearxNG proxy searches"/>
+                                </DockPanel>
                                 <DockPanel Margin="0,6,0,0">
                                     <Label Content="Root" Width="38"/>
                                     <TextBox x:Name="ToolRootBox" VerticalContentAlignment="Center"

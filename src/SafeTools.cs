@@ -45,7 +45,8 @@ public static class SafeToolRegistry
     public static IReadOnlyList<SafeToolDefinition> GetDefinitions(
         bool fileRead,
         bool calculator,
-        bool pythonEvaluation)
+        bool pythonEvaluation,
+        bool webSearch = false)
     {
         var definitions = new List<SafeToolDefinition>();
         if (fileRead)
@@ -107,6 +108,33 @@ public static class SafeToolRegistry
                         },
                     },
                     ["required"] = new[] { "code" },
+                    ["additionalProperties"] = false,
+                }));
+        }
+
+        if (webSearch)
+        {
+            definitions.Add(new SafeToolDefinition(
+                "web_search",
+                "Search the web through the configured DuckDuckGo endpoint or SearxNG proxy. The user must confirm before any network request.",
+                new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["query"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "string",
+                            ["description"] = "A concise web search query",
+                        },
+                        ["max_results"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "integer",
+                            ["minimum"] = 1,
+                            ["maximum"] = 8,
+                        },
+                    },
+                    ["required"] = new[] { "query" },
                     ["additionalProperties"] = false,
                 }));
         }
@@ -181,7 +209,8 @@ public static class SafeToolExecutor
     public static async Task<ToolExecutionResult> ExecuteAsync(
         ToolCallRequest request,
         string safeRoot,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        WebSearchOptions? webSearchOptions = null)
     {
         try
         {
@@ -191,6 +220,7 @@ public static class SafeToolExecutor
                 "read_file" => ReadFile(arguments.RootElement, safeRoot),
                 "calculator" => Calculate(arguments.RootElement),
                 "python_eval" => await EvaluatePythonAsync(arguments.RootElement, safeRoot, cancellationToken),
+                "web_search" => await ExecuteWebSearchAsync(arguments.RootElement, webSearchOptions, cancellationToken),
                 _ => ToolExecutionResult.Error($"Unknown tool: {request.Name}"),
             };
         }
@@ -202,6 +232,24 @@ public static class SafeToolExecutor
         {
             return ToolExecutionResult.Error(ex.Message);
         }
+    }
+
+    private static async Task<ToolExecutionResult> ExecuteWebSearchAsync(
+        JsonElement arguments,
+        WebSearchOptions? options,
+        CancellationToken cancellationToken)
+    {
+        if (options is null)
+            return ToolExecutionResult.Error("Web search is not configured.");
+        var query = ReadString(arguments, "query");
+        var maxResults = arguments.TryGetProperty("max_results", out var max)
+            && max.TryGetInt32(out var parsedMax)
+            ? Math.Clamp(parsedMax, 1, 8)
+            : options.MaxResults;
+        return await WebSearchService.SearchAsync(
+            query,
+            options with { MaxResults = maxResults },
+            cancellationToken);
     }
 
     private static ToolExecutionResult ReadFile(JsonElement arguments, string safeRoot)

@@ -1221,11 +1221,22 @@ public partial class MainWindow : Window
         var definitions = SafeToolRegistry.GetDefinitions(
             FileReadToolCheck.IsChecked == true,
             CalculatorToolCheck.IsChecked == true,
-            PythonToolCheck.IsChecked == true);
+            PythonToolCheck.IsChecked == true,
+            WebSearchToolCheck.IsChecked == true);
         ToolStatusLabel.Text = definitions.Count == 0
             ? "Enable at least one tool before sending a tool-enabled request."
             : $"Enabled: {string.Join(", ", definitions.Select(definition => definition.Name))}. Confirmation is required.";
         return definitions;
+    }
+
+    private WebSearchOptions GetWebSearchOptions()
+    {
+        var provider = (WebSearchProviderCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "duckduckgo";
+        return new WebSearchOptions(
+            ToolsEnabledCheck.IsChecked == true && WebSearchToolCheck.IsChecked == true,
+            provider,
+            WebSearchEndpointBox.Text.Trim(),
+            5);
     }
 
     private bool AttachChatToCurrentServer()
@@ -1895,9 +1906,12 @@ public partial class MainWindow : Window
         }
 
         var call = _pendingToolCalls.Peek();
+        var scope = string.Equals(call.Name, "web_search", StringComparison.OrdinalIgnoreCase)
+            ? $"Provider: {(WebSearchProviderCombo.SelectedItem as ComboBoxItem)?.Content}"
+            : $"Safe root: {ToolRootBox.Text.Trim()}";
         ToolConfirmationLabel.Text =
             $"{call.Name}\nArguments: {FormatToolArguments(call.ArgumentsJson)}\n" +
-            $"Safe root: {ToolRootBox.Text.Trim()}";
+            scope;
         ToolConfirmationPanel.Visibility = Visibility.Visible;
         SendBtn.IsEnabled = false;
         StatusLabel.Text = $"Confirm tool call: {call.Name}";
@@ -1915,7 +1929,11 @@ public partial class MainWindow : Window
         try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            var result = await SafeToolExecutor.ExecuteAsync(call, ToolRootBox.Text.Trim(), timeout.Token);
+            var result = await SafeToolExecutor.ExecuteAsync(
+                call,
+                ToolRootBox.Text.Trim(),
+                timeout.Token,
+                GetWebSearchOptions());
             AppendToolResult(call, result);
         }
         catch (OperationCanceledException)
@@ -2864,6 +2882,14 @@ public partial class MainWindow : Window
             CalculatorToolCheck.IsChecked = GetBool("tool_calculator", true);
             PythonToolCheck.IsChecked = GetBool("tool_python_eval", false);
             ToolRootBox.Text = GetStr("tool_root", GetDefaultToolRoot());
+            WebSearchToolCheck.IsChecked = GetBool("tool_web_search", false);
+            WebSearchEndpointBox.Text = GetStr("web_search_endpoint", "http://127.0.0.1:8080");
+            var webSearchProvider = GetStr("web_search_provider", "duckduckgo");
+            WebSearchProviderCombo.SelectedItem = WebSearchProviderCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag?.ToString(), webSearchProvider, StringComparison.OrdinalIgnoreCase))
+                ?? WebSearchProviderCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
             RagEnabledCheck.IsChecked = GetBool("rag_enabled", false);
             RagTopKBox.Text = GetInt("rag_top_k", 4).ToString();
             RagFolderBox.Text = GetStr("rag_folder");
@@ -2925,6 +2951,9 @@ public partial class MainWindow : Window
             ["tool_calculator"] = CalculatorToolCheck.IsChecked == true,
             ["tool_python_eval"] = PythonToolCheck.IsChecked == true,
             ["tool_root"] = ToolRootBox.Text,
+            ["tool_web_search"] = WebSearchToolCheck.IsChecked == true,
+            ["web_search_provider"] = (WebSearchProviderCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "duckduckgo",
+            ["web_search_endpoint"] = WebSearchEndpointBox.Text,
             ["rag_enabled"] = RagEnabledCheck.IsChecked == true,
             ["rag_top_k"] = int.TryParse(RagTopKBox.Text, out var ragTopK) ? Math.Clamp(ragTopK, 1, 12) : 4,
             ["rag_folder"] = RagFolderBox.Text,

@@ -18,6 +18,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added local PDF/Markdown/text RAG indexing with chunked embeddings, persisted sources, drag-and-drop ingestion, and prompt retrieval.
 - Added a selectable RAG excerpt viewer with source, chunk, and relevance highlighting.
 - Added persisted folder watching with debounced re-indexing and removal of deleted document sources.
+- Added opt-in, confirmation-gated web search through DuckDuckGo or a configured SearxNG proxy.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
