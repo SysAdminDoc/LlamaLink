@@ -29,6 +29,7 @@ public partial class MainWindow : Window
     private readonly List<Dictionary<string, string>> _messages = new();
     private readonly Dictionary<int, IReadOnlyList<ChatImageAttachment>> _messageImages = new();
     private readonly List<ChatImageAttachment> _pendingImages = new();
+    private readonly ObservableCollection<string> _tokenProbabilityRows = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private readonly DispatcherTimer _streamTimer;
     private readonly DispatcherTimer _healthTimer;
@@ -59,6 +60,8 @@ public partial class MainWindow : Window
     private bool _streamDirty;
     private int _tokenCount;
     private long _streamStartTime;
+    private TokenProbabilityOptions _activeTokenProbabilityOptions = new(false, 5);
+    private bool _activeTokenProbabilityBackendSupports;
     private ToolCallAccumulator? _toolCallAccumulator;
     private readonly Queue<ToolCallRequest> _pendingToolCalls = new();
     private readonly List<SystemPromptEntry> _promptEntries = new();
@@ -89,6 +92,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        TokenProbabilityList.ItemsSource = _tokenProbabilityRows;
 
         _settingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -2053,9 +2057,10 @@ public partial class MainWindow : Window
 
         var payloadMessages = BuildPayloadMessagesWithRag();
         var toolDefinitions = GetEnabledToolDefinitions();
+        var tokenProbabilityOptions = GetTokenProbabilityOptions();
         var payload = BackendAdapter.BuildPayload(
             backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens,
-            tools: toolDefinitions, grammar: GetGrammarConstraint());
+            tools: toolDefinitions, grammar: GetGrammarConstraint(), tokenProbabilities: tokenProbabilityOptions);
 
         _streaming = true;
         RefreshForkMessageOptions();
@@ -2063,6 +2068,14 @@ public partial class MainWindow : Window
         _streamDirty = false;
         _tokenCount = 0;
         _streamStartTime = Stopwatch.GetTimestamp();
+        _activeTokenProbabilityOptions = tokenProbabilityOptions;
+        _activeTokenProbabilityBackendSupports = backend != LlamaBackendKind.Ollama;
+        _tokenProbabilityRows.Clear();
+        TokenProbabilityStatusLabel.Text = !_activeTokenProbabilityOptions.Enabled
+            ? "Token probabilities are disabled."
+            : _activeTokenProbabilityBackendSupports
+                ? $"Collecting top {_activeTokenProbabilityOptions.ClampedTopK} alternatives..."
+                : "The Ollama API does not expose token probabilities.";
         SendBtn.Visibility = Visibility.Collapsed;
         StopGenBtn.Visibility = Visibility.Visible;
         SpeedLabel.Text = "";
@@ -2100,12 +2113,29 @@ public partial class MainWindow : Window
                 if (part is null) continue;
                 if (part.ToolCalls is { Count: > 0 })
                     _toolCallAccumulator.Add(part.ToolCalls);
+                if (part.TokenProbabilities is { Count: > 0 } probabilities)
+                {
+                    foreach (var probability in probabilities)
+                    {
+                        while (_tokenProbabilityRows.Count >= 512)
+                            _tokenProbabilityRows.RemoveAt(0);
+                        _tokenProbabilityRows.Add(TokenProbabilityFormatting.Format(probability));
+                    }
+                    _tokenCount += probabilities.Count;
+                    TokenProbabilityStatusLabel.Text =
+                        $"Showing {_tokenProbabilityRows.Count} token(s); top {_activeTokenProbabilityOptions.ClampedTopK} alternatives";
+                    if (_tokenProbabilityRows.Count > 0)
+                        TokenProbabilityList.ScrollIntoView(_tokenProbabilityRows[^1]);
+                }
+                else if (!string.IsNullOrEmpty(part.Content))
+                {
+                    _tokenCount++;
+                }
                 if (part.Done) break;
 
                 if (!string.IsNullOrEmpty(part.Content))
                 {
                     _streamBuffer += part.Content;
-                    _tokenCount++;
                     _streamDirty = true;
                 }
             }
@@ -2165,6 +2195,13 @@ public partial class MainWindow : Window
             var tps = _tokenCount / elapsed;
             SpeedLabel.Text = $"{tps:F1} tok/s ({_tokenCount} tokens in {elapsed:F1}s)";
         }
+
+        if (!_activeTokenProbabilityOptions.Enabled)
+            TokenProbabilityStatusLabel.Text = "Token probabilities are disabled.";
+        else if (!_activeTokenProbabilityBackendSupports)
+            TokenProbabilityStatusLabel.Text = "The Ollama API does not expose token probabilities.";
+        else if (_tokenProbabilityRows.Count == 0)
+            TokenProbabilityStatusLabel.Text = "The backend returned no token probabilities.";
 
         var toolCalls = _toolCallAccumulator?.Complete() ?? Array.Empty<ToolCallRequest>();
         _toolCallAccumulator = null;
@@ -2373,6 +2410,7 @@ public partial class MainWindow : Window
         _messages.Clear();
         _messageImages.Clear();
         _chatMessages.Clear();
+        ClearTokenProbabilityViewer();
         EmptyState.Visibility = Visibility.Visible;
         TokenCountLabel.Text = "";
         SpeedLabel.Text = "";
@@ -2526,6 +2564,7 @@ public partial class MainWindow : Window
             _messages.Clear();
             _messageImages.Clear();
             _chatMessages.Clear();
+            ClearTokenProbabilityViewer();
             _pendingImages.Clear();
             _regeneratingOriginal = null;
             _toolCallAccumulator = null;
@@ -2771,6 +2810,7 @@ public partial class MainWindow : Window
                 ["content"] = message.Content,
             }));
             _chatMessages.Clear();
+            ClearTokenProbabilityViewer();
             foreach (var (message, index) in branchMessages.Select((message, index) => (message, index)))
             {
                 if (message.Images.Count > 0)
@@ -2902,6 +2942,20 @@ public partial class MainWindow : Window
     {
         var modeTag = (GrammarModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "None";
         return new GrammarConstraint(GrammarTemplates.ParseMode(modeTag), GrammarEditorBox.Text.Trim());
+    }
+
+    private TokenProbabilityOptions GetTokenProbabilityOptions()
+    {
+        var topK = int.TryParse(TokenProbabilitiesKBox.Text, out var parsedTopK) ? parsedTopK : 5;
+        return new TokenProbabilityOptions(TokenProbabilitiesCheck.IsChecked == true, topK);
+    }
+
+    private void ClearTokenProbabilityViewer()
+    {
+        _tokenProbabilityRows.Clear();
+        TokenProbabilityStatusLabel.Text = _activeTokenProbabilityOptions.Enabled
+            ? "Ready to collect token probabilities on the next response."
+            : "Token probabilities are disabled.";
     }
 
     private void GrammarMode_Changed(object sender, SelectionChangedEventArgs e)
@@ -3245,6 +3299,8 @@ public partial class MainWindow : Window
             TopKBox.Text = GetInt("top_k", 40).ToString();
             RepSlider.Value = GetInt("repeat_penalty", 110);
             MaxTokensBox.Text = GetInt("max_tokens", 2048).ToString();
+            TokenProbabilitiesCheck.IsChecked = GetBool("token_probabilities_enabled", false);
+            TokenProbabilitiesKBox.Text = GetInt("token_probabilities_top_k", 5).ToString();
             var grammarMode = GrammarTemplates.ParseMode(GetStr("grammar_mode", "None"));
             GrammarModeCombo.SelectedItem = GrammarModeCombo.Items
                 .OfType<ComboBoxItem>()
@@ -3336,6 +3392,10 @@ public partial class MainWindow : Window
             ["top_k"] = int.TryParse(TopKBox.Text, out var k) ? k : 40,
             ["repeat_penalty"] = (int)RepSlider.Value,
             ["max_tokens"] = int.TryParse(MaxTokensBox.Text, out var m) ? m : 2048,
+            ["token_probabilities_enabled"] = TokenProbabilitiesCheck.IsChecked == true,
+            ["token_probabilities_top_k"] = int.TryParse(TokenProbabilitiesKBox.Text, out var probabilityTopK)
+                ? Math.Clamp(probabilityTopK, 1, 20)
+                : 5,
             ["grammar_mode"] = (GrammarModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "None",
             ["grammar_editor"] = GrammarEditorBox.Text,
             ["system_prompt"] = SystemPromptBox.Text,

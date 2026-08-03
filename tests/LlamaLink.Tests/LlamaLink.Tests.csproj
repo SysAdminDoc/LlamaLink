@@ -28,6 +28,7 @@
     <Compile Include="..\..\src\SpeechIntegration.cs" Link="SpeechIntegration.cs" />
     <Compile Include="..\..\src\ImageGeneration.cs" Link="ImageGeneration.cs" />
     <Compile Include="..\..\src\GrammarTemplates.cs" Link="GrammarTemplates.cs" />
+    <Compile Include="..\..\src\TokenProbabilities.cs" Link="TokenProbabilities.cs" />
   </ItemGroup>
 
 </Project>

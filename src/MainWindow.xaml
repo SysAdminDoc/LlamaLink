@@ -290,6 +290,27 @@
                                 <TextBlock x:Name="GrammarStatusLabel" Text="No output constraint is sent."
                                            Foreground="{StaticResource Overlay0Brush}" FontSize="10"
                                            TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                <CheckBox x:Name="TokenProbabilitiesCheck" Content="Collect token alternatives"
+                                          Margin="0,10,0,0" Foreground="{StaticResource TextBrush}"/>
+                                <DockPanel Margin="0,4,0,0">
+                                    <Label Content="Top-K" Width="50" FontSize="11"/>
+                                    <TextBox x:Name="TokenProbabilitiesKBox" Text="5" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <TextBlock x:Name="TokenProbabilityStatusLabel" Text="Token probabilities are disabled."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="10"
+                                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                <ListBox x:Name="TokenProbabilityList" Height="150" Margin="0,5,0,0"
+                                         Background="{StaticResource CrustBrush}"
+                                         BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1"
+                                         Padding="2" FontFamily="Consolas" FontSize="10"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap"
+                                                       Foreground="{StaticResource TextBrush}" Margin="2,2"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </StackPanel>
                         </GroupBox>
 

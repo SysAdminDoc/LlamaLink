@@ -23,6 +23,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added optional ffmpeg, whisper.cpp, and Piper speech adapters for hold-to-record transcription and WAV synthesis.
 - Added an optional `/image <prompt>` stable-diffusion.cpp command adapter with bounded local PNG output.
 - Added selectable JSON, regex, code-only, and custom GBNF output constraints with backend-specific payload hints.
+- Added an opt-in token-probability viewer with streamed top-K alternatives for compatible OpenAI-style backends.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

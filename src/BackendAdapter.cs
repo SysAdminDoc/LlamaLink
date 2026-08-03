@@ -25,7 +25,8 @@ public sealed record BackendToolCallFragment(
 public sealed record BackendStreamPart(
     string Content,
     bool Done,
-    IReadOnlyList<BackendToolCallFragment>? ToolCalls = null);
+    IReadOnlyList<BackendToolCallFragment>? ToolCalls = null,
+    IReadOnlyList<TokenProbabilityEntry>? TokenProbabilities = null);
 
 public static class BackendAdapter
 {
@@ -83,7 +84,8 @@ public static class BackendAdapter
         double repeatPenalty,
         int maxTokens,
         IReadOnlyList<SafeToolDefinition>? tools = null,
-        GrammarConstraint? grammar = null)
+        GrammarConstraint? grammar = null,
+        TokenProbabilityOptions? tokenProbabilities = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
@@ -129,6 +131,7 @@ public static class BackendAdapter
         if (tools is { Count: > 0 })
             payload["tools"] = tools.Select(tool => tool.ToPayload()).ToArray();
         ApplyGrammarConstraint(payload, grammar);
+        ApplyTokenProbabilityOptions(payload, tokenProbabilities);
         return payload;
     }
 
@@ -144,6 +147,16 @@ public static class BackendAdapter
                 ["type"] = "json_object",
             };
         }
+    }
+
+    private static void ApplyTokenProbabilityOptions(
+        Dictionary<string, object> payload,
+        TokenProbabilityOptions? options)
+    {
+        if (options is not { Enabled: true }) return;
+
+        payload["logprobs"] = true;
+        payload["top_logprobs"] = options.ClampedTopK;
     }
 
     private static Dictionary<string, object> BuildMessagePayload(
@@ -238,7 +251,8 @@ public static class BackendAdapter
                 var choice = choices[0];
                 var content = ReadContent(choice, "delta") ?? ReadContent(choice, "message") ?? "";
                 var toolCalls = ReadOpenAiToolCalls(choice);
-                return new BackendStreamPart(content, done, toolCalls);
+                var tokenProbabilities = ReadTokenProbabilities(choice);
+                return new BackendStreamPart(content, done, toolCalls, tokenProbabilities);
             }
 
             if (root.TryGetProperty("results", out var results)
@@ -266,6 +280,62 @@ public static class BackendAdapter
             && value.TryGetProperty("content", out var content)
             ? content.GetString()
             : null;
+    }
+
+    private static IReadOnlyList<TokenProbabilityEntry>? ReadTokenProbabilities(JsonElement choice)
+    {
+        if (!choice.TryGetProperty("logprobs", out var logprobs)
+            || logprobs.ValueKind != JsonValueKind.Object
+            || !logprobs.TryGetProperty("content", out var content)
+            || content.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var entries = new List<TokenProbabilityEntry>();
+        foreach (var item in content.EnumerateArray())
+        {
+            if (!item.TryGetProperty("token", out var tokenElement)
+                || tokenElement.ValueKind != JsonValueKind.String
+                || !TryReadDouble(item, "logprob", out var logProbability))
+            {
+                continue;
+            }
+
+            var alternatives = new List<TokenProbabilityAlternative>();
+            if (item.TryGetProperty("top_logprobs", out var topLogprobs)
+                && topLogprobs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var alternative in topLogprobs.EnumerateArray())
+                {
+                    if (alternative.TryGetProperty("token", out var alternativeToken)
+                        && alternativeToken.ValueKind == JsonValueKind.String
+                        && TryReadDouble(alternative, "logprob", out var alternativeLogProbability))
+                    {
+                        alternatives.Add(new TokenProbabilityAlternative(
+                            alternativeToken.GetString() ?? "", alternativeLogProbability));
+                    }
+                }
+            }
+
+            entries.Add(new TokenProbabilityEntry(tokenElement.GetString() ?? "", logProbability, alternatives));
+        }
+
+        return entries.Count == 0 ? null : entries;
+    }
+
+    private static bool TryReadDouble(JsonElement parent, string propertyName, out double value)
+    {
+        if (parent.TryGetProperty(propertyName, out var element)
+            && element.ValueKind == JsonValueKind.Number
+            && element.TryGetDouble(out value)
+            && double.IsFinite(value))
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
     }
 
     private static IReadOnlyList<BackendToolCallFragment>? ReadOpenAiToolCalls(JsonElement choice)
