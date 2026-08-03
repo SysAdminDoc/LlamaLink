@@ -50,6 +50,10 @@ public partial class MainWindow : Window
     private bool _updatingPrompts;
     private string? _currentChatFile;
     private string? _chatAttachedContext;
+    private string? _branchId;
+    private string? _parentChat;
+    private int? _branchPoint;
+    private string? _branchName;
     private bool _serverManaged;
     private string? _hfSelectedRepo;
     private List<HfModelResult> _hfCachedResults = new();
@@ -92,6 +96,7 @@ public partial class MainWindow : Window
         LoadSettings();
         LoadPromptLibrary();
         RefreshChatHistory();
+        RefreshForkMessageOptions();
         UpdateChatContextLabel();
 
         Closing += OnWindowClosing;
@@ -104,6 +109,12 @@ public partial class MainWindow : Window
         public string Content { get; set; } = "";
         public SolidColorBrush Accent { get; set; } = UserAccent;
         public SolidColorBrush Background { get; set; } = UserBg;
+    }
+
+    public class BranchMessageOption
+    {
+        public int Index { get; set; }
+        public string Content { get; set; } = "";
     }
 
     public class HfModelResult
@@ -1319,6 +1330,7 @@ public partial class MainWindow : Window
             backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens, toolDefinitions);
 
         _streaming = true;
+        RefreshForkMessageOptions();
         _streamBuffer = "";
         _streamDirty = false;
         _tokenCount = 0;
@@ -1464,6 +1476,7 @@ public partial class MainWindow : Window
         foreach (var call in toolCalls)
             _pendingToolCalls.Enqueue(call);
         SaveCurrentChat();
+        RefreshForkMessageOptions();
         ShowNextToolCall();
     }
 
@@ -1569,6 +1582,7 @@ public partial class MainWindow : Window
         _toolCallAccumulator = null;
         _pendingToolCalls.Clear();
         ToolConfirmationPanel.Visibility = Visibility.Collapsed;
+        RefreshForkMessageOptions();
 
         // Remove the placeholder assistant message
         if (_chatMessages.Count > 0 && _chatMessages[^1].RoleLabel == "Assistant")
@@ -1597,9 +1611,14 @@ public partial class MainWindow : Window
         SpeedLabel.Text = "";
         _currentChatFile = null;
         _chatAttachedContext = null;
+        _branchId = null;
+        _parentChat = null;
+        _branchPoint = null;
+        _branchName = null;
         _toolCallAccumulator = null;
         _pendingToolCalls.Clear();
         ToolConfirmationPanel.Visibility = Visibility.Collapsed;
+        RefreshForkMessageOptions();
         UpdateChatContextLabel();
         StatusLabel.Text = "New chat started";
     }
@@ -1662,7 +1681,11 @@ public partial class MainWindow : Window
         var json = ChatHistoryStore.Serialize(
             _messages,
             _chatAttachedContext,
-            DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            _branchId,
+            _parentChat,
+            _branchPoint,
+            _branchName);
         File.WriteAllText(_currentChatFile, json);
         RefreshChatHistory();
     }
@@ -1697,9 +1720,12 @@ public partial class MainWindow : Window
                     }
                 }
 
+                var title = document.BranchName is { Length: > 0 } branchName
+                    ? $"[Branch: {branchName}] {firstUser}"
+                    : firstUser;
                 var item = new ListBoxItem
                 {
-                    Content = $"{firstUser}  [{msgCount} msgs]",
+                    Content = $"{title}  [{msgCount} msgs]",
                     Tag = fpath
                 };
                 HistoryList.Items.Add(item);
@@ -1735,16 +1761,157 @@ public partial class MainWindow : Window
 
             _currentChatFile = fpath;
             _chatAttachedContext = document.ServerContext;
+            _branchId = document.BranchId;
+            _parentChat = document.ParentChat;
+            _branchPoint = document.BranchPoint;
+            _branchName = document.BranchName;
             var msgCount = _messages.Count(m => m["role"] != "system");
             TokenCountLabel.Text = $"{msgCount} messages";
             SpeedLabel.Text = "";
             StatusLabel.Text = $"Loaded chat: {Path.GetFileName(fpath)}";
+            RefreshForkMessageOptions();
             UpdateChatContextLabel();
             ScrollChatToBottom();
         }
         catch (Exception ex)
         {
             StatusLabel.Text = $"Failed to load chat: {ex.Message}";
+        }
+    }
+
+    private void RefreshForkMessageOptions()
+    {
+        if (ForkMessageCombo is null || ForkBranchBtn is null)
+            return;
+
+        var options = _messages
+            .Select((message, index) =>
+            {
+                var role = message.TryGetValue("role", out var rawRole) ? rawRole : "message";
+                var content = message.TryGetValue("content", out var rawContent) ? rawContent : "";
+                var preview = Regex.Replace(content, @"\s+", " ").Trim();
+                if (preview.Length > 64)
+                    preview = preview[..64] + "...";
+                return new BranchMessageOption
+                {
+                    Index = index,
+                    Content = $"{index + 1}. {CultureInfo.CurrentCulture.TextInfo.ToTitleCase(role)}: {preview}",
+                };
+            })
+            .ToList();
+
+        ForkMessageCombo.ItemsSource = options;
+        if (options.Count > 0)
+            ForkMessageCombo.SelectedIndex = options.Count - 1;
+        ForkBranchBtn.IsEnabled = options.Count > 0 && !_streaming && _pendingToolCalls.Count == 0;
+        UpdateBranchStatusLabel();
+    }
+
+    private void UpdateBranchStatusLabel()
+    {
+        if (BranchStatusLabel is null)
+            return;
+
+        BranchStatusLabel.Text = string.IsNullOrWhiteSpace(_branchName)
+            ? "Fork a message; the parent chat stays in History."
+            : $"{ConversationBrancher.Describe(_branchName, _parentChat)}; parent retained in History.";
+    }
+
+    private string BuildUniqueBranchPath(string branchName)
+    {
+        var fileName = ConversationBrancher.BuildFileName(DateTimeOffset.Now, branchName);
+        var candidate = Path.Combine(_chatHistoryDir, fileName);
+        if (!File.Exists(candidate))
+            return candidate;
+
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        while (true)
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..8];
+            candidate = Path.Combine(_chatHistoryDir, $"{stem}_{suffix}.json");
+            if (!File.Exists(candidate))
+                return candidate;
+        }
+    }
+
+    private void ForkBranch_Click(object sender, RoutedEventArgs e)
+    {
+        if (_messages.Count == 0)
+        {
+            StatusLabel.Text = "Start a conversation before creating a branch";
+            return;
+        }
+
+        if (_streaming || _pendingToolCalls.Count > 0)
+        {
+            StatusLabel.Text = "Finish the current response before creating a branch";
+            return;
+        }
+
+        if (ForkMessageCombo.SelectedItem is not BranchMessageOption option)
+        {
+            StatusLabel.Text = "Choose a message to fork from";
+            return;
+        }
+
+        try
+        {
+            SaveCurrentChat();
+            var parentPath = _currentChatFile;
+            if (string.IsNullOrWhiteSpace(parentPath))
+            {
+                StatusLabel.Text = "The parent chat could not be saved";
+                return;
+            }
+
+            var source = _messages.Select(message => new ChatHistoryMessage
+            {
+                Role = message.TryGetValue("role", out var role) ? role : "",
+                Content = message.TryGetValue("content", out var content) ? content : "",
+            }).ToList();
+            var branchMessages = ConversationBrancher.SliceThrough(source, option.Index);
+            var branchName = Regex.Replace(BranchNameBox.Text.Trim(), @"\s+", " ");
+            if (string.IsNullOrWhiteSpace(branchName))
+                branchName = "Alternate";
+            if (branchName.Length > 60)
+                branchName = branchName[..60].Trim();
+
+            var branchPath = BuildUniqueBranchPath(branchName);
+            _branchId = Guid.NewGuid().ToString("N");
+            _parentChat = parentPath;
+            _branchPoint = option.Index;
+            _branchName = branchName;
+            _currentChatFile = branchPath;
+
+            _messages.Clear();
+            _messages.AddRange(branchMessages.Select(message => new Dictionary<string, string>
+            {
+                ["role"] = message.Role,
+                ["content"] = message.Content,
+            }));
+            _chatMessages.Clear();
+            foreach (var message in branchMessages)
+                _chatMessages.Add(MakeChatVM(message.Role, message.Content));
+
+            EmptyState.Visibility = _messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            TokenCountLabel.Text = $"{_messages.Count(m => m["role"] != "system")} messages";
+            BranchNameBox.Text = branchName;
+            RefreshForkMessageOptions();
+            UpdateChatContextLabel();
+            SaveCurrentChat();
+
+            var branchItem = HistoryList.Items
+                .OfType<ListBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag as string, branchPath, StringComparison.OrdinalIgnoreCase));
+            if (branchItem is not null)
+                HistoryList.SelectedItem = branchItem;
+
+            StatusLabel.Text = $"{ConversationBrancher.Describe(branchName, parentPath)}; both chats remain in History";
+            ScrollChatToBottom();
+        }
+        catch (Exception ex)
+        {
+            StatusLabel.Text = $"Failed to create branch: {ex.Message}";
         }
     }
 
@@ -1796,7 +1963,14 @@ public partial class MainWindow : Window
         {
             File.Delete(fpath);
             if (_currentChatFile == fpath)
+            {
                 _currentChatFile = null;
+                _branchId = null;
+                _parentChat = null;
+                _branchPoint = null;
+                _branchName = null;
+                UpdateBranchStatusLabel();
+            }
             RefreshChatHistory();
             StatusLabel.Text = "Chat deleted";
         }

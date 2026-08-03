@@ -28,6 +28,18 @@ public sealed class ChatHistoryDocument
 
     [JsonPropertyName("server_context")]
     public string? ServerContext { get; set; }
+
+    [JsonPropertyName("branch_id")]
+    public string? BranchId { get; set; }
+
+    [JsonPropertyName("parent_chat")]
+    public string? ParentChat { get; set; }
+
+    [JsonPropertyName("branch_point")]
+    public int? BranchPoint { get; set; }
+
+    [JsonPropertyName("branch_name")]
+    public string? BranchName { get; set; }
 }
 
 public static class ChatHistoryStore
@@ -37,7 +49,11 @@ public static class ChatHistoryStore
     public static string Serialize(
         IEnumerable<Dictionary<string, string>> messages,
         string? serverContext,
-        long timestamp)
+        long timestamp,
+        string? branchId = null,
+        string? parentChat = null,
+        int? branchPoint = null,
+        string? branchName = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
@@ -50,6 +66,10 @@ public static class ChatHistoryStore
             }).ToList(),
             Timestamp = timestamp,
             ServerContext = string.IsNullOrWhiteSpace(serverContext) ? null : serverContext,
+            BranchId = string.IsNullOrWhiteSpace(branchId) ? null : branchId,
+            ParentChat = string.IsNullOrWhiteSpace(parentChat) ? null : parentChat,
+            BranchPoint = branchPoint,
+            BranchName = string.IsNullOrWhiteSpace(branchName) ? null : branchName,
         };
 
         return JsonSerializer.Serialize(document, WriteOptions);

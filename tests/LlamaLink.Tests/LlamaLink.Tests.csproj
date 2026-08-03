@@ -19,6 +19,7 @@
     <Compile Include="..\..\src\BackendAdapter.cs" Link="BackendAdapter.cs" />
     <Compile Include="..\..\src\SafeTools.cs" Link="SafeTools.cs" />
     <Compile Include="..\..\src\PromptLibrary.cs" Link="PromptLibrary.cs" />
+    <Compile Include="..\..\src\ConversationBranching.cs" Link="ConversationBranching.cs" />
   </ItemGroup>
 
 </Project>

@@ -12,6 +12,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added backend adapters for Ollama, KoboldCpp, and text-generation-webui with automatic endpoint and stream translation.
 - Added opt-in, confirmation-gated safe tools for confined file reads, arithmetic, and restricted Python expressions.
 - Added a shareable system prompt library with curated domains, custom JSON persistence, import, and export.
+- Added persistent conversation branching from any message while retaining the parent chat for comparison.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

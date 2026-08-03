@@ -342,6 +342,19 @@
                         <GroupBox Header="History">
                             <StackPanel>
                                 <ListBox x:Name="HistoryList" Height="110" SelectionChanged="History_Selected"/>
+                                <TextBlock Text="Fork from message" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" Margin="0,8,0,3"/>
+                                <ComboBox x:Name="ForkMessageCombo" DisplayMemberPath="Content"
+                                          VerticalContentAlignment="Center"/>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Button x:Name="ForkBranchBtn" Content="Fork branch" Click="ForkBranch_Click"
+                                            Style="{StaticResource MauveButton}" Padding="10,5"/>
+                                    <TextBox x:Name="BranchNameBox" Text="Alternate" Margin="6,0,0,0"
+                                             VerticalContentAlignment="Center" ToolTip="Name for the new branch"/>
+                                </DockPanel>
+                                <TextBlock x:Name="BranchStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Fork a message; the parent chat stays in History."/>
                                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                     <Button Content="Export" Click="ExportChat_Click" Style="{StaticResource GhostButton}"/>
                                     <Button Content="Delete" Click="DeleteChat_Click" Style="{StaticResource GhostButton}"
