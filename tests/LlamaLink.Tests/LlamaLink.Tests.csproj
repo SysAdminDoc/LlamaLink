@@ -21,6 +21,7 @@
     <Compile Include="..\..\src\PromptLibrary.cs" Link="PromptLibrary.cs" />
     <Compile Include="..\..\src\ConversationBranching.cs" Link="ConversationBranching.cs" />
     <Compile Include="..\..\src\ChatRegeneration.cs" Link="ChatRegeneration.cs" />
+    <Compile Include="..\..\src\ChatFewShotEditor.cs" Link="ChatFewShotEditor.cs" />
   </ItemGroup>
 
 </Project>

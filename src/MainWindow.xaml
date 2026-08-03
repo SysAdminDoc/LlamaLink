@@ -362,6 +362,28 @@
                                 </StackPanel>
                             </StackPanel>
                         </GroupBox>
+
+                        <GroupBox Header="Few-shot editor">
+                            <StackPanel>
+                                <TextBlock Text="Edit assistant examples to steer later replies."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,5"/>
+                                <ComboBox x:Name="FewShotTurnCombo" DisplayMemberPath="Display"
+                                          SelectionChanged="FewShotTurn_Selected" VerticalContentAlignment="Center"/>
+                                <TextBox x:Name="FewShotEditorBox" AcceptsReturn="True" TextWrapping="Wrap"
+                                         Height="90" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0"
+                                         Padding="6"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button x:Name="ApplyFewShotBtn" Content="Apply turn" Click="ApplyFewShot_Click"
+                                            Style="{StaticResource GreenButton}" Padding="10,5" IsEnabled="False"/>
+                                    <Button Content="Reload" Click="ReloadFewShot_Click"
+                                            Style="{StaticResource GhostButton}" Padding="10,5" Margin="5,0,0,0"/>
+                                </DockPanel>
+                                <TextBlock x:Name="FewShotStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Assistant turns appear here after a response."/>
+                            </StackPanel>
+                        </GroupBox>
                     </StackPanel>
                 </ScrollViewer>
 

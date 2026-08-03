@@ -14,6 +14,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added a shareable system prompt library with curated domains, custom JSON persistence, import, and export.
 - Added persistent conversation branching from any message while retaining the parent chat for comparison.
 - Added guarded last-response regeneration using the current temperature and top-p settings.
+- Added a multi-turn few-shot editor for revising assistant examples in saved conversations.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

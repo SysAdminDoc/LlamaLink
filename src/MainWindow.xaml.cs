@@ -48,6 +48,7 @@ public partial class MainWindow : Window
     private readonly Queue<ToolCallRequest> _pendingToolCalls = new();
     private readonly List<SystemPromptEntry> _promptEntries = new();
     private bool _updatingPrompts;
+    private bool _updatingFewShot;
     private string? _currentChatFile;
     private string? _chatAttachedContext;
     private string? _branchId;
@@ -1871,6 +1872,93 @@ public partial class MainWindow : Window
             && _messages[^1].TryGetValue("role", out var lastRole)
             && string.Equals(lastRole, "assistant", StringComparison.OrdinalIgnoreCase);
         UpdateBranchStatusLabel();
+        RefreshFewShotEditor();
+    }
+
+    private void RefreshFewShotEditor()
+    {
+        if (FewShotTurnCombo is null || ApplyFewShotBtn is null || FewShotEditorBox is null)
+            return;
+
+        var history = _messages.Select(message => new ChatHistoryMessage
+        {
+            Role = message.TryGetValue("role", out var role) ? role : "",
+            Content = message.TryGetValue("content", out var content) ? content : "",
+        }).ToList();
+        var previousIndex = (FewShotTurnCombo.SelectedItem as FewShotTurn)?.Index;
+        var turns = ChatFewShotEditor.FindAssistantTurns(history);
+
+        _updatingFewShot = true;
+        FewShotTurnCombo.ItemsSource = turns;
+        var selected = turns.FirstOrDefault(turn => turn.Index == previousIndex) ?? turns.LastOrDefault();
+        FewShotTurnCombo.SelectedItem = selected;
+        _updatingFewShot = false;
+
+        FewShotEditorBox.Text = selected?.Content ?? "";
+        ApplyFewShotBtn.IsEnabled = selected is not null && !_streaming && _pendingToolCalls.Count == 0;
+        FewShotStatusLabel.Text = selected is null
+            ? "Assistant turns appear here after a response."
+            : $"{turns.Count} assistant turn{(turns.Count == 1 ? "" : "s")} available for editing.";
+    }
+
+    private void FewShotTurn_Selected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingFewShot)
+            return;
+
+        if (FewShotTurnCombo.SelectedItem is FewShotTurn turn)
+        {
+            FewShotEditorBox.Text = turn.Content;
+            ApplyFewShotBtn.IsEnabled = !_streaming && _pendingToolCalls.Count == 0;
+        }
+        else
+        {
+            FewShotEditorBox.Clear();
+            ApplyFewShotBtn.IsEnabled = false;
+        }
+    }
+
+    private void ReloadFewShot_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshFewShotEditor();
+        FewShotStatusLabel.Text = FewShotTurnCombo.SelectedItem is null
+            ? "Assistant turns appear here after a response."
+            : "Loaded the selected assistant turn from chat history.";
+    }
+
+    private void ApplyFewShot_Click(object sender, RoutedEventArgs e)
+    {
+        if (_streaming || _pendingToolCalls.Count > 0)
+        {
+            FewShotStatusLabel.Text = "Finish the current response before editing a turn";
+            return;
+        }
+
+        if (FewShotTurnCombo.SelectedItem is not FewShotTurn turn)
+        {
+            FewShotStatusLabel.Text = "Select an assistant turn to edit";
+            return;
+        }
+
+        var history = _messages.Select(message => new ChatHistoryMessage
+        {
+            Role = message.TryGetValue("role", out var role) ? role : "",
+            Content = message.TryGetValue("content", out var content) ? content : "",
+        }).ToList();
+        if (!ChatFewShotEditor.TryApplyAssistantEdit(history, turn.Index, FewShotEditorBox.Text))
+        {
+            FewShotStatusLabel.Text = "Assistant text cannot be empty";
+            return;
+        }
+
+        _messages[turn.Index]["content"] = history[turn.Index].Content;
+        if (turn.Index < _chatMessages.Count)
+            _chatMessages[turn.Index] = MakeChatVM("assistant", history[turn.Index].Content);
+        TokenCountLabel.Text = $"{_messages.Count(message => message["role"] != "system")} messages";
+        SaveCurrentChat();
+        RefreshFewShotEditor();
+        FewShotStatusLabel.Text = $"Updated assistant turn {turn.Index + 1}; future sends will use the edited example.";
+        ScrollChatToBottom();
     }
 
     private void UpdateBranchStatusLabel()
