@@ -15,6 +15,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added persistent conversation branching from any message while retaining the parent chat for comparison.
 - Added guarded last-response regeneration using the current temperature and top-p settings.
 - Added a multi-turn few-shot editor for revising assistant examples in saved conversations.
+- Added local PDF/Markdown/text RAG indexing with chunked embeddings, persisted sources, drag-and-drop ingestion, and prompt retrieval.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

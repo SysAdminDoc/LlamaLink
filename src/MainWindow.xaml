@@ -338,6 +338,28 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Local RAG">
+                            <StackPanel>
+                                <CheckBox x:Name="RagEnabledCheck" Content="Inject relevant local excerpts" IsChecked="False"/>
+                                <ListBox x:Name="RagSourceList" Height="72" Margin="0,6,0,0"
+                                         AllowDrop="True" Drop="RagFiles_Drop" PreviewDragOver="RagFiles_DragOver"
+                                         ToolTip="Drop .pdf, .md, or .txt files here"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button x:Name="RagAddBtn" Content="Add files" Click="RagAdd_Click" Style="{StaticResource AccentButton}"
+                                            Padding="10,5"/>
+                                    <Button x:Name="RagClearBtn" Content="Clear index" Click="RagClear_Click" Style="{StaticResource GhostButton}"
+                                            Padding="10,5" Margin="5,0,0,0"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
+                                        <Label Content="Top" Padding="6,5,2,5"/>
+                                        <TextBox x:Name="RagTopKBox" Text="4" Width="34" VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </DockPanel>
+                                <TextBlock x:Name="RagStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Drop documents here to build a local index."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Chat History ── -->
                         <GroupBox Header="History">
                             <StackPanel>

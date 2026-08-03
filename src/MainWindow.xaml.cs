@@ -33,6 +33,9 @@ public partial class MainWindow : Window
     private readonly string _settingsPath;
     private readonly string _chatHistoryDir;
     private readonly string _promptLibraryPath;
+    private readonly string _ragIndexPath;
+    private RagIndex _ragIndex = new();
+    private bool _ragIndexing;
     private CancellationTokenSource? _serverUpdateCts;
     private LlamaServerRelease? _latestServerRelease;
 
@@ -84,8 +87,19 @@ public partial class MainWindow : Window
         _promptLibraryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".llamalink", "prompts.json");
+        _ragIndexPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".llamalink", "rag-index.json");
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
         Directory.CreateDirectory(_chatHistoryDir);
+        try
+        {
+            _ragIndex = RagIndexStore.Load(_ragIndexPath);
+        }
+        catch
+        {
+            _ragIndex = new RagIndex();
+        }
 
         ChatMessages.ItemsSource = _chatMessages;
 
@@ -99,6 +113,7 @@ public partial class MainWindow : Window
         LoadPromptLibrary();
         RefreshChatHistory();
         RefreshForkMessageOptions();
+        RefreshRagSources();
         UpdateChatContextLabel();
 
         Closing += OnWindowClosing;
@@ -1264,6 +1279,146 @@ public partial class MainWindow : Window
         StatusLabel.Text = "Chat detached; its messages remain available for another server";
     }
 
+    private static string[] SupportedRagPaths(IEnumerable<string> paths)
+        => paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Where(RagTextExtractor.IsSupported)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private void RefreshRagSources()
+    {
+        if (RagSourceList is null)
+            return;
+
+        var sources = _ragIndex.SourcePaths.ToList();
+        RagSourceList.ItemsSource = sources
+            .Select(path => $"{Path.GetFileName(path)}\n{path}")
+            .ToList();
+        RagStatusLabel.Text = sources.Count == 0
+            ? "Drop .pdf, .md, or .txt files here to build a local index."
+            : $"{sources.Count} document{(sources.Count == 1 ? "" : "s")} · {_ragIndex.ChunkCount} chunks · local embeddings";
+    }
+
+    private void RagAdd_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Documents (*.pdf;*.md;*.txt)|*.pdf;*.md;*.txt|All files (*.*)|*.*",
+            Multiselect = true,
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog() == true)
+            IndexRagFilesAsync(dialog.FileNames);
+    }
+
+    private void RagFiles_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private void RagFiles_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+            IndexRagFilesAsync(paths);
+    }
+
+    private async void IndexRagFilesAsync(IEnumerable<string> paths)
+    {
+        if (_ragIndexing)
+            return;
+
+        var candidates = SupportedRagPaths(paths);
+        if (candidates.Length == 0)
+        {
+            RagStatusLabel.Text = "Choose or drop at least one .pdf, .md, or .txt file.";
+            return;
+        }
+
+        _ragIndexing = true;
+        RagAddBtn.IsEnabled = false;
+        RagClearBtn.IsEnabled = false;
+        RagStatusLabel.Text = $"Indexing {candidates.Length} document{(candidates.Length == 1 ? "" : "s")}...";
+        try
+        {
+            var result = await Task.Run(() => _ragIndex.IndexFiles(candidates));
+            RagIndexStore.Save(_ragIndexPath, _ragIndex);
+            RefreshRagSources();
+            var errorText = result.Errors.Count == 0
+                ? ""
+                : $" Errors: {string.Join(" | ", result.Errors)}";
+            RagStatusLabel.Text = $"Indexed {result.FilesIndexed} file{(result.FilesIndexed == 1 ? "" : "s")} " +
+                $"into {result.ChunksIndexed} chunks.{errorText}";
+        }
+        catch (Exception ex)
+        {
+            RagStatusLabel.Text = $"RAG indexing failed: {ex.Message}";
+        }
+        finally
+        {
+            _ragIndexing = false;
+            RagAddBtn.IsEnabled = true;
+            RagClearBtn.IsEnabled = true;
+        }
+    }
+
+    private void RagClear_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ragIndexing)
+            return;
+
+        _ragIndex.Clear();
+        RagIndexStore.Save(_ragIndexPath, _ragIndex);
+        RefreshRagSources();
+        RagStatusLabel.Text = "RAG index cleared; source files were not deleted.";
+    }
+
+    private List<ChatHistoryMessage> BuildPayloadMessagesWithRag()
+    {
+        var messages = _messages.Select(message => new ChatHistoryMessage
+        {
+            Role = message["role"],
+            Content = message["content"],
+        }).ToList();
+
+        if (RagEnabledCheck.IsChecked != true || _ragIndex.ChunkCount == 0)
+            return messages;
+
+        var query = messages.LastOrDefault(message =>
+            string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))?.Content;
+        var topK = int.TryParse(RagTopKBox.Text, out var parsedTopK) ? Math.Clamp(parsedTopK, 1, 12) : 4;
+        var matches = _ragIndex.Search(query ?? "", topK);
+        if (matches.Count == 0)
+        {
+            RagStatusLabel.Text = "RAG enabled, but no indexed excerpt matched this question.";
+            return messages;
+        }
+
+        var context = RagIndex.FormatContext(matches);
+        var system = messages.FirstOrDefault(message =>
+            string.Equals(message.Role, "system", StringComparison.OrdinalIgnoreCase));
+        if (system is null)
+        {
+            messages.Insert(0, new ChatHistoryMessage
+            {
+                Role = "system",
+                Content = $"Local RAG context:\n{context}",
+            });
+        }
+        else
+        {
+            system.Content = $"{system.Content.Trim()}\n\nLocal RAG context:\n{context}".Trim();
+        }
+
+        RagStatusLabel.Text = $"Retrieved {matches.Count} local excerpt{(matches.Count == 1 ? "" : "s")} for this prompt.";
+        return messages;
+    }
+
     private void Send_Click(object sender, RoutedEventArgs e) => SendMessage();
     private void Regenerate_Click(object sender, RoutedEventArgs e) => SendMessage(regenerate: true);
     private void StopGen_Click(object sender, RoutedEventArgs e) => _streamCts?.Cancel();
@@ -1349,11 +1504,7 @@ public partial class MainWindow : Window
         int.TryParse(TopKBox.Text, out int topK);
         int.TryParse(MaxTokensBox.Text, out int maxTokens);
 
-        var payloadMessages = _messages.Select(message => new ChatHistoryMessage
-        {
-            Role = message["role"],
-            Content = message["content"],
-        }).ToList();
+        var payloadMessages = BuildPayloadMessagesWithRag();
         var toolDefinitions = GetEnabledToolDefinitions();
         var payload = BackendAdapter.BuildPayload(
             backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens, toolDefinitions);
@@ -2504,6 +2655,8 @@ public partial class MainWindow : Window
             CalculatorToolCheck.IsChecked = GetBool("tool_calculator", true);
             PythonToolCheck.IsChecked = GetBool("tool_python_eval", false);
             ToolRootBox.Text = GetStr("tool_root", GetDefaultToolRoot());
+            RagEnabledCheck.IsChecked = GetBool("rag_enabled", false);
+            RagTopKBox.Text = GetInt("rag_top_k", 4).ToString();
             var backendTag = GetStr("backend", "openai");
             BackendCombo.SelectedItem = BackendCombo.Items
                 .OfType<ComboBoxItem>()
@@ -2560,6 +2713,8 @@ public partial class MainWindow : Window
             ["tool_calculator"] = CalculatorToolCheck.IsChecked == true,
             ["tool_python_eval"] = PythonToolCheck.IsChecked == true,
             ["tool_root"] = ToolRootBox.Text,
+            ["rag_enabled"] = RagEnabledCheck.IsChecked == true,
+            ["rag_top_k"] = int.TryParse(RagTopKBox.Text, out var ragTopK) ? Math.Clamp(ragTopK, 1, 12) : 4,
             ["managed_mode"] = ManagedCheck.IsChecked == true,
             ["selected_model"] = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "",
             ["server_profiles"] = ServerProfileStore.ToJson(_serverProfiles),
