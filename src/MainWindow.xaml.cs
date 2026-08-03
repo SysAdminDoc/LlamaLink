@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _healthTimer;
     private readonly string _settingsPath;
     private readonly string _chatHistoryDir;
+    private readonly string _promptLibraryPath;
     private CancellationTokenSource? _serverUpdateCts;
     private LlamaServerRelease? _latestServerRelease;
 
@@ -45,6 +46,8 @@ public partial class MainWindow : Window
     private long _streamStartTime;
     private ToolCallAccumulator? _toolCallAccumulator;
     private readonly Queue<ToolCallRequest> _pendingToolCalls = new();
+    private readonly List<SystemPromptEntry> _promptEntries = new();
+    private bool _updatingPrompts;
     private string? _currentChatFile;
     private string? _chatAttachedContext;
     private bool _serverManaged;
@@ -72,6 +75,9 @@ public partial class MainWindow : Window
         _chatHistoryDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".llamalink", "chats");
+        _promptLibraryPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".llamalink", "prompts.json");
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
         Directory.CreateDirectory(_chatHistoryDir);
 
@@ -84,6 +90,7 @@ public partial class MainWindow : Window
         _healthTimer.Tick += async (_, _) => await CheckServerHealth();
 
         LoadSettings();
+        LoadPromptLibrary();
         RefreshChatHistory();
         UpdateChatContextLabel();
 
@@ -122,6 +129,226 @@ public partial class MainWindow : Window
                     ? $"{Size / (1024.0 * 1024):F1} MB"
                     : $"{Size / 1024.0:F0} KB"
             : "?";
+    }
+
+    // ── System prompt library ───────────────────────────────────────────
+    private void LoadPromptLibrary()
+    {
+        try
+        {
+            _promptEntries.Clear();
+            _promptEntries.AddRange(PromptLibraryStore.Load(_promptLibraryPath));
+        }
+        catch
+        {
+            _promptEntries.Clear();
+            _promptEntries.AddRange(PromptLibraryStore.CreateDefaults());
+            PromptStatusLabel.Text = "Prompt file could not be read; using built-in prompts.";
+        }
+
+        RefreshPromptDomains("Code");
+    }
+
+    private void RefreshPromptDomains(string? preferredDomain = null)
+    {
+        _updatingPrompts = true;
+        try
+        {
+            var existing = PromptDomainCombo.Items
+                .OfType<ComboBoxItem>()
+                .Select(item => item.Tag?.ToString() ?? "")
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var domain in _promptEntries
+                .Select(entry => entry.Domain)
+                .Where(domain => !string.IsNullOrWhiteSpace(domain))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!existing.Contains(domain))
+                {
+                    PromptDomainCombo.Items.Add(new ComboBoxItem { Content = domain, Tag = domain });
+                    existing.Add(domain);
+                }
+            }
+
+            var target = preferredDomain ?? (PromptDomainCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Code";
+            PromptDomainCombo.SelectedItem = PromptDomainCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag?.ToString(), target, StringComparison.OrdinalIgnoreCase))
+                ?? PromptDomainCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
+        }
+        finally
+        {
+            _updatingPrompts = false;
+        }
+
+        RefreshPromptList();
+    }
+
+    private void RefreshPromptList(string? selectedId = null)
+    {
+        var domain = (PromptDomainCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Code";
+        var visible = _promptEntries
+            .Where(entry => string.Equals(entry.Domain, domain, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        _updatingPrompts = true;
+        try
+        {
+            PromptCombo.ItemsSource = null;
+            PromptCombo.ItemsSource = visible;
+            if (!string.IsNullOrEmpty(selectedId))
+            {
+                PromptCombo.SelectedItem = visible.FirstOrDefault(entry =>
+                    string.Equals(entry.Id, selectedId, StringComparison.OrdinalIgnoreCase));
+            }
+            else
+            {
+                PromptCombo.SelectedIndex = visible.Count > 0 ? 0 : -1;
+            }
+        }
+        finally
+        {
+            _updatingPrompts = false;
+        }
+
+        if (PromptCombo.SelectedItem is SystemPromptEntry selected)
+            LoadPromptIntoEditor(selected);
+        else
+        {
+            PromptNameBox.Text = "";
+            PromptEditorBox.Text = "";
+        }
+    }
+
+    private void PromptDomain_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_updatingPrompts) RefreshPromptList();
+    }
+
+    private void Prompt_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingPrompts || PromptCombo.SelectedItem is not SystemPromptEntry entry) return;
+        LoadPromptIntoEditor(entry);
+    }
+
+    private void LoadPromptIntoEditor(SystemPromptEntry entry)
+    {
+        PromptNameBox.Text = entry.Name;
+        PromptEditorBox.Text = entry.Content;
+        PromptStatusLabel.Text = entry.BuiltIn
+            ? $"Built-in {entry.Domain} prompt. Save custom to create an editable copy."
+            : $"Custom {entry.Domain} prompt.";
+    }
+
+    private void ApplyPrompt_Click(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(PromptEditorBox.Text))
+        {
+            PromptStatusLabel.Text = "Choose or write a prompt before applying it.";
+            return;
+        }
+
+        SystemPromptBox.Text = PromptEditorBox.Text.Trim();
+        PromptStatusLabel.Text = "Prompt applied to the active chat settings.";
+        StatusLabel.Text = "System prompt applied";
+    }
+
+    private void SavePrompt_Click(object sender, RoutedEventArgs e)
+    {
+        var domain = (PromptDomainCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Custom";
+        var name = PromptNameBox.Text.Trim();
+        var content = PromptEditorBox.Text.Trim();
+        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(content))
+        {
+            PromptStatusLabel.Text = "Custom prompts require a name and content.";
+            return;
+        }
+
+        var selected = PromptCombo.SelectedItem as SystemPromptEntry;
+        var entry = new SystemPromptEntry
+        {
+            Id = selected is not null && !selected.BuiltIn ? selected.Id : Guid.NewGuid().ToString("N"),
+            Domain = domain,
+            Name = name,
+            Content = content,
+            BuiltIn = false,
+        };
+        PromptLibraryStore.Upsert(_promptEntries, entry);
+        PromptLibraryStore.Save(_promptLibraryPath, _promptEntries);
+        RefreshPromptDomains(domain);
+        RefreshPromptList(entry.Id);
+        PromptStatusLabel.Text = $"Saved custom prompt '{entry.Name}'.";
+    }
+
+    private void DeletePrompt_Click(object sender, RoutedEventArgs e)
+    {
+        if (PromptCombo.SelectedItem is not SystemPromptEntry entry)
+        {
+            PromptStatusLabel.Text = "Select a prompt first.";
+            return;
+        }
+        if (entry.BuiltIn)
+        {
+            PromptStatusLabel.Text = "Built-in prompts cannot be deleted.";
+            return;
+        }
+
+        _promptEntries.Remove(entry);
+        PromptLibraryStore.Save(_promptLibraryPath, _promptEntries);
+        RefreshPromptList();
+        PromptStatusLabel.Text = $"Deleted prompt '{entry.Name}'.";
+    }
+
+    private void ImportPrompts_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import system prompts",
+            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var imported = PromptLibraryStore.Parse(File.ReadAllText(dialog.FileName));
+            foreach (var entry in imported)
+            {
+                entry.BuiltIn = false;
+                PromptLibraryStore.Upsert(_promptEntries, entry);
+            }
+            PromptLibraryStore.Save(_promptLibraryPath, _promptEntries);
+            RefreshPromptDomains(imported.FirstOrDefault()?.Domain ?? "Custom");
+            PromptStatusLabel.Text = $"Imported {imported.Count} prompt(s).";
+        }
+        catch (Exception ex)
+        {
+            PromptStatusLabel.Text = $"Prompt import failed: {ex.Message}";
+        }
+    }
+
+    private void ExportPrompts_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export system prompts",
+            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+            FileName = "llamalink-prompts.json",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            File.WriteAllText(dialog.FileName, PromptLibraryStore.Serialize(_promptEntries));
+            PromptStatusLabel.Text = $"Exported prompts to {dialog.FileName}.";
+        }
+        catch (Exception ex)
+        {
+            PromptStatusLabel.Text = $"Prompt export failed: {ex.Message}";
+        }
     }
 
     // ── Mode toggle ──────────────────────────────────────────────────────

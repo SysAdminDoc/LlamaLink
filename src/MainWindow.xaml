@@ -280,6 +280,45 @@
                                      Height="60" VerticalScrollBarVisibility="Auto"/>
                         </GroupBox>
 
+                        <!-- ── System prompt library ── -->
+                        <GroupBox Header="System prompt library">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button Content="Export" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                            Click="ExportPrompts_Click" Padding="8,4"/>
+                                    <ComboBox x:Name="PromptDomainCombo" SelectionChanged="PromptDomain_Changed"
+                                              VerticalContentAlignment="Center">
+                                        <ComboBoxItem Content="Code" Tag="Code" IsSelected="True"/>
+                                        <ComboBoxItem Content="Roleplay" Tag="Roleplay"/>
+                                        <ComboBoxItem Content="Summarize" Tag="Summarize"/>
+                                        <ComboBoxItem Content="Translate" Tag="Translate"/>
+                                        <ComboBoxItem Content="Custom" Tag="Custom"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button Content="Import" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                            Click="ImportPrompts_Click" Padding="8,4"/>
+                                    <ComboBox x:Name="PromptCombo" DisplayMemberPath="Name"
+                                              SelectionChanged="Prompt_Changed" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <TextBox x:Name="PromptNameBox" Margin="0,6,0,0" VerticalContentAlignment="Center"
+                                         ToolTip="Name for a custom prompt"/>
+                                <TextBox x:Name="PromptEditorBox" AcceptsReturn="True" TextWrapping="Wrap"
+                                         Height="78" Margin="0,6,0,0" VerticalScrollBarVisibility="Auto"
+                                         ToolTip="Edit the selected prompt before applying or saving"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="Apply" Style="{StaticResource AccentButton}" Click="ApplyPrompt_Click" Padding="10,4"/>
+                                    <Button Content="Save custom" Style="{StaticResource GhostButton}" Click="SavePrompt_Click"
+                                            Margin="6,0,0,0" Padding="8,4"/>
+                                    <Button Content="Delete" Style="{StaticResource GhostButton}" Foreground="{StaticResource RedBrush}"
+                                            Click="DeletePrompt_Click" Margin="2,0,0,0" Padding="8,4"/>
+                                </StackPanel>
+                                <TextBlock x:Name="PromptStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Choose a curated prompt or save your own."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Safe tools ── -->
                         <GroupBox Header="Safe tools">
                             <StackPanel>

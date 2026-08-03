@@ -11,6 +11,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added a llama.cpp release updater with hardware-aware Windows x64 asset selection and safe ZIP downloads.
 - Added backend adapters for Ollama, KoboldCpp, and text-generation-webui with automatic endpoint and stream translation.
 - Added opt-in, confirmation-gated safe tools for confined file reads, arithmetic, and restricted Python expressions.
+- Added a shareable system prompt library with curated domains, custom JSON persistence, import, and export.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
