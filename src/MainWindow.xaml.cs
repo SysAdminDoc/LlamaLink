@@ -43,6 +43,8 @@ public partial class MainWindow : Window
     private bool _streamDirty;
     private int _tokenCount;
     private long _streamStartTime;
+    private ToolCallAccumulator? _toolCallAccumulator;
+    private readonly Queue<ToolCallRequest> _pendingToolCalls = new();
     private string? _currentChatFile;
     private string? _chatAttachedContext;
     private bool _serverManaged;
@@ -938,6 +940,24 @@ public partial class MainWindow : Window
     private bool IsServerReady => string.Equals(
         ServerStatusLabel.Text, "Running", StringComparison.OrdinalIgnoreCase);
 
+    private IReadOnlyList<SafeToolDefinition> GetEnabledToolDefinitions()
+    {
+        if (ToolsEnabledCheck.IsChecked != true)
+        {
+            ToolStatusLabel.Text = "Tools are disabled for this chat.";
+            return Array.Empty<SafeToolDefinition>();
+        }
+
+        var definitions = SafeToolRegistry.GetDefinitions(
+            FileReadToolCheck.IsChecked == true,
+            CalculatorToolCheck.IsChecked == true,
+            PythonToolCheck.IsChecked == true);
+        ToolStatusLabel.Text = definitions.Count == 0
+            ? "Enable at least one tool before sending a tool-enabled request."
+            : $"Enabled: {string.Join(", ", definitions.Select(definition => definition.Name))}. Confirmation is required.";
+        return definitions;
+    }
+
     private bool AttachChatToCurrentServer()
     {
         if (!IsServerReady)
@@ -1067,8 +1087,9 @@ public partial class MainWindow : Window
             Role = message["role"],
             Content = message["content"],
         }).ToList();
+        var toolDefinitions = GetEnabledToolDefinitions();
         var payload = BackendAdapter.BuildPayload(
-            backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens);
+            backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens, toolDefinitions);
 
         _streaming = true;
         _streamBuffer = "";
@@ -1085,6 +1106,7 @@ public partial class MainWindow : Window
         ScrollChatToBottom();
 
         _streamCts = new CancellationTokenSource();
+        _toolCallAccumulator = new ToolCallAccumulator();
         _streamTimer.Start();
         StatusLabel.Text = "Generating response...";
 
@@ -1109,6 +1131,8 @@ public partial class MainWindow : Window
                 if (line == null) break;
                 var part = BackendAdapter.ParseStreamLine(backend, line);
                 if (part is null) continue;
+                if (part.ToolCalls is { Count: > 0 })
+                    _toolCallAccumulator.Add(part.ToolCalls);
                 if (part.Done) break;
 
                 if (!string.IsNullOrEmpty(part.Content))
@@ -1165,6 +1189,7 @@ public partial class MainWindow : Window
         _streamTimer.Stop();
         _streaming = false;
         SendBtn.Visibility = Visibility.Visible;
+        SendBtn.IsEnabled = true;
         StopGenBtn.Visibility = Visibility.Collapsed;
 
         var elapsed = Stopwatch.GetElapsedTime(_streamStartTime).TotalSeconds;
@@ -1174,9 +1199,22 @@ public partial class MainWindow : Window
             SpeedLabel.Text = $"{tps:F1} tok/s ({_tokenCount} tokens in {elapsed:F1}s)";
         }
 
-        if (!string.IsNullOrEmpty(_streamBuffer))
+        var toolCalls = _toolCallAccumulator?.Complete() ?? Array.Empty<ToolCallRequest>();
+        _toolCallAccumulator = null;
+        var assistantContent = _streamBuffer;
+        if (toolCalls.Count > 0)
         {
-            _messages.Add(new() { ["role"] = "assistant", ["content"] = _streamBuffer });
+            var summary = string.Join(
+                "\n",
+                toolCalls.Select(call => $"Tool request: {call.Name} {FormatToolArguments(call.ArgumentsJson)}"));
+            assistantContent = string.IsNullOrWhiteSpace(assistantContent)
+                ? summary
+                : $"{assistantContent}\n\n{summary}";
+        }
+
+        if (!string.IsNullOrEmpty(assistantContent))
+        {
+            _messages.Add(new() { ["role"] = "assistant", ["content"] = assistantContent });
 
             // Final update of assistant bubble
             if (_chatMessages.Count > 0)
@@ -1184,7 +1222,7 @@ public partial class MainWindow : Window
                 _chatMessages[^1] = new ChatMessageVM
                 {
                     RoleLabel = "Assistant",
-                    Content = _streamBuffer,
+                    Content = assistantContent,
                     Accent = AssistantAccent,
                     Background = AssistantBg
                 };
@@ -1196,7 +1234,101 @@ public partial class MainWindow : Window
         StatusLabel.Text = "Response complete";
         ScrollChatToBottom();
 
+        foreach (var call in toolCalls)
+            _pendingToolCalls.Enqueue(call);
         SaveCurrentChat();
+        ShowNextToolCall();
+    }
+
+    private static string FormatToolArguments(string argumentsJson)
+    {
+        var compact = argumentsJson.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return compact.Length > 600 ? compact[..600] + "..." : compact;
+    }
+
+    private void ShowNextToolCall()
+    {
+        if (_pendingToolCalls.Count == 0)
+        {
+            ToolConfirmationPanel.Visibility = Visibility.Collapsed;
+            SendBtn.IsEnabled = true;
+            return;
+        }
+
+        var call = _pendingToolCalls.Peek();
+        ToolConfirmationLabel.Text =
+            $"{call.Name}\nArguments: {FormatToolArguments(call.ArgumentsJson)}\n" +
+            $"Safe root: {ToolRootBox.Text.Trim()}";
+        ToolConfirmationPanel.Visibility = Visibility.Visible;
+        SendBtn.IsEnabled = false;
+        StatusLabel.Text = $"Confirm tool call: {call.Name}";
+    }
+
+    private async void ApproveTool_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pendingToolCalls.Count == 0) return;
+
+        var call = _pendingToolCalls.Dequeue();
+        ApproveToolBtn.IsEnabled = false;
+        DenyToolBtn.IsEnabled = false;
+        ToolConfirmationLabel.Text = $"Executing {call.Name}...";
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var result = await SafeToolExecutor.ExecuteAsync(call, ToolRootBox.Text.Trim(), timeout.Token);
+            AppendToolResult(call, result);
+        }
+        catch (OperationCanceledException)
+        {
+            AppendToolResult(call, ToolExecutionResult.Error("Tool execution timed out or was cancelled."));
+        }
+        finally
+        {
+            ApproveToolBtn.IsEnabled = true;
+            DenyToolBtn.IsEnabled = true;
+        }
+
+        FinishOrContinueToolCalls();
+    }
+
+    private void DenyTool_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pendingToolCalls.Count == 0) return;
+        var call = _pendingToolCalls.Dequeue();
+        AppendToolResult(call, ToolExecutionResult.Error("The user denied this tool call."));
+        FinishOrContinueToolCalls();
+    }
+
+    private void AppendToolResult(ToolCallRequest call, ToolExecutionResult result)
+    {
+        var prefix = result.Success ? "Tool result" : "Tool error";
+        var content = $"{prefix} ({call.Name}):\n{result.Content}";
+        _messages.Add(new() { ["role"] = "user", ["content"] = content });
+        _chatMessages.Add(new ChatMessageVM
+        {
+            RoleLabel = prefix,
+            Content = content,
+            Accent = result.Success ? AssistantAccent : new SolidColorBrush(Color.FromRgb(0xF3, 0x8B, 0xA8)),
+            Background = SystemBg,
+        });
+        TokenCountLabel.Text = $"{_messages.Count(message => message["role"] != "system")} messages";
+        ScrollChatToBottom();
+        SaveCurrentChat();
+    }
+
+    private void FinishOrContinueToolCalls()
+    {
+        if (_pendingToolCalls.Count > 0)
+        {
+            ShowNextToolCall();
+            return;
+        }
+
+        ToolConfirmationPanel.Visibility = Visibility.Collapsed;
+        SendBtn.IsEnabled = true;
+        InputBox.Text = "Use the approved tool result to continue the task.";
+        SendMessage();
     }
 
     private void OnChatError(string error)
@@ -1204,8 +1336,12 @@ public partial class MainWindow : Window
         _streamTimer.Stop();
         _streaming = false;
         SendBtn.Visibility = Visibility.Visible;
+        SendBtn.IsEnabled = true;
         StopGenBtn.Visibility = Visibility.Collapsed;
         SpeedLabel.Text = "";
+        _toolCallAccumulator = null;
+        _pendingToolCalls.Clear();
+        ToolConfirmationPanel.Visibility = Visibility.Collapsed;
 
         // Remove the placeholder assistant message
         if (_chatMessages.Count > 0 && _chatMessages[^1].RoleLabel == "Assistant")
@@ -1234,6 +1370,9 @@ public partial class MainWindow : Window
         SpeedLabel.Text = "";
         _currentChatFile = null;
         _chatAttachedContext = null;
+        _toolCallAccumulator = null;
+        _pendingToolCalls.Clear();
+        ToolConfirmationPanel.Visibility = Visibility.Collapsed;
         UpdateChatContextLabel();
         StatusLabel.Text = "New chat started";
     }
@@ -1354,6 +1493,9 @@ public partial class MainWindow : Window
 
             _messages.Clear();
             _chatMessages.Clear();
+            _toolCallAccumulator = null;
+            _pendingToolCalls.Clear();
+            ToolConfirmationPanel.Visibility = Visibility.Collapsed;
             EmptyState.Visibility = Visibility.Collapsed;
 
             foreach (var message in document.Messages)
@@ -1764,6 +1906,7 @@ public partial class MainWindow : Window
         {
             // Auto-detect llama-server
             ExePathBox.Text = FindLlamaServer();
+            ToolRootBox.Text = GetDefaultToolRoot();
             return;
         }
 
@@ -1801,6 +1944,11 @@ public partial class MainWindow : Window
             MlockCheck.IsChecked = GetBool("mlock", false);
             ExtUrlBox.Text = GetStr("ext_url", "http://127.0.0.1:8080");
             ExtModelBox.Text = GetStr("external_model", "llama3.2");
+            ToolsEnabledCheck.IsChecked = GetBool("tools_enabled", false);
+            FileReadToolCheck.IsChecked = GetBool("tool_read_file", true);
+            CalculatorToolCheck.IsChecked = GetBool("tool_calculator", true);
+            PythonToolCheck.IsChecked = GetBool("tool_python_eval", false);
+            ToolRootBox.Text = GetStr("tool_root", GetDefaultToolRoot());
             var backendTag = GetStr("backend", "openai");
             BackendCombo.SelectedItem = BackendCombo.Items
                 .OfType<ComboBoxItem>()
@@ -1818,9 +1966,15 @@ public partial class MainWindow : Window
         catch
         {
             ExePathBox.Text = FindLlamaServer();
+            ToolRootBox.Text = GetDefaultToolRoot();
             _serverProfiles.Clear();
             RefreshProfileCombo();
         }
+    }
+
+    private static string GetDefaultToolRoot()
+    {
+        return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
     }
 
     private void SaveSettings()
@@ -1846,6 +2000,11 @@ public partial class MainWindow : Window
             ["ext_url"] = ExtUrlBox.Text,
             ["external_model"] = ExtModelBox.Text,
             ["backend"] = (BackendCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "openai",
+            ["tools_enabled"] = ToolsEnabledCheck.IsChecked == true,
+            ["tool_read_file"] = FileReadToolCheck.IsChecked == true,
+            ["tool_calculator"] = CalculatorToolCheck.IsChecked == true,
+            ["tool_python_eval"] = PythonToolCheck.IsChecked == true,
+            ["tool_root"] = ToolRootBox.Text,
             ["managed_mode"] = ManagedCheck.IsChecked == true,
             ["selected_model"] = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "",
             ["server_profiles"] = ServerProfileStore.ToJson(_serverProfiles),

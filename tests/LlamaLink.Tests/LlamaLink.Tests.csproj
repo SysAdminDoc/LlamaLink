@@ -17,6 +17,7 @@
     <Compile Include="..\..\src\ChatHistory.cs" Link="ChatHistory.cs" />
     <Compile Include="..\..\src\LlamaServerUpdater.cs" Link="LlamaServerUpdater.cs" />
     <Compile Include="..\..\src\BackendAdapter.cs" Link="BackendAdapter.cs" />
+    <Compile Include="..\..\src\SafeTools.cs" Link="SafeTools.cs" />
   </ItemGroup>
 
 </Project>

@@ -16,7 +16,16 @@ public enum LlamaBackendKind
     TextGenerationWebUi,
 }
 
-public sealed record BackendStreamPart(string Content, bool Done);
+public sealed record BackendToolCallFragment(
+    string Index,
+    string Id,
+    string Name,
+    string Arguments);
+
+public sealed record BackendStreamPart(
+    string Content,
+    bool Done,
+    IReadOnlyList<BackendToolCallFragment>? ToolCalls = null);
 
 public static class BackendAdapter
 {
@@ -72,7 +81,8 @@ public static class BackendAdapter
         double topP,
         int topK,
         double repeatPenalty,
-        int maxTokens)
+        int maxTokens,
+        IReadOnlyList<SafeToolDefinition>? tools = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
@@ -84,7 +94,7 @@ public static class BackendAdapter
 
         if (backend == LlamaBackendKind.Ollama)
         {
-            return new Dictionary<string, object>
+            var ollamaPayload = new Dictionary<string, object>
             {
                 ["model"] = model.Trim(),
                 ["messages"] = messagePayload,
@@ -98,6 +108,9 @@ public static class BackendAdapter
                     ["num_predict"] = maxTokens,
                 },
             };
+            if (tools is { Count: > 0 })
+                ollamaPayload["tools"] = tools.Select(tool => tool.ToPayload()).ToArray();
+            return ollamaPayload;
         }
 
         var payload = new Dictionary<string, object>
@@ -111,6 +124,8 @@ public static class BackendAdapter
         };
         if (!string.IsNullOrWhiteSpace(model)) payload["model"] = model.Trim();
         if (maxTokens > 0) payload["max_tokens"] = maxTokens;
+        if (tools is { Count: > 0 })
+            payload["tools"] = tools.Select(tool => tool.ToPayload()).ToArray();
         return payload;
     }
 
@@ -132,11 +147,12 @@ public static class BackendAdapter
 
             if (backend == LlamaBackendKind.Ollama)
             {
+                var toolCalls = ReadOllamaToolCalls(root);
                 var content = root.TryGetProperty("message", out var message)
                     && message.TryGetProperty("content", out var messageContent)
                     ? messageContent.GetString() ?? ""
                     : root.TryGetProperty("response", out var response) ? response.GetString() ?? "" : "";
-                return new BackendStreamPart(content, done);
+                return new BackendStreamPart(content, done, toolCalls);
             }
 
             if (root.TryGetProperty("choices", out var choices)
@@ -145,7 +161,8 @@ public static class BackendAdapter
             {
                 var choice = choices[0];
                 var content = ReadContent(choice, "delta") ?? ReadContent(choice, "message") ?? "";
-                return new BackendStreamPart(content, done);
+                var toolCalls = ReadOpenAiToolCalls(choice);
+                return new BackendStreamPart(content, done, toolCalls);
             }
 
             if (root.TryGetProperty("results", out var results)
@@ -173,5 +190,64 @@ public static class BackendAdapter
             && value.TryGetProperty("content", out var content)
             ? content.GetString()
             : null;
+    }
+
+    private static IReadOnlyList<BackendToolCallFragment>? ReadOpenAiToolCalls(JsonElement choice)
+    {
+        if (!choice.TryGetProperty("delta", out var delta)
+            || !delta.TryGetProperty("tool_calls", out var calls)
+            || calls.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var fragments = new List<BackendToolCallFragment>();
+        foreach (var call in calls.EnumerateArray())
+        {
+            var index = call.TryGetProperty("index", out var indexElement)
+                ? indexElement.ToString()
+                : fragments.Count.ToString();
+            var id = call.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? "" : "";
+            var name = "";
+            var arguments = "";
+            if (call.TryGetProperty("function", out var function))
+            {
+                if (function.TryGetProperty("name", out var nameElement))
+                    name = nameElement.GetString() ?? "";
+                if (function.TryGetProperty("arguments", out var argumentsElement))
+                    arguments = argumentsElement.GetString() ?? "";
+            }
+            fragments.Add(new BackendToolCallFragment(index, id, name, arguments));
+        }
+
+        return fragments;
+    }
+
+    private static IReadOnlyList<BackendToolCallFragment>? ReadOllamaToolCalls(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var message)
+            || !message.TryGetProperty("tool_calls", out var calls)
+            || calls.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var fragments = new List<BackendToolCallFragment>();
+        var index = 0;
+        foreach (var call in calls.EnumerateArray())
+        {
+            if (!call.TryGetProperty("function", out var function)) continue;
+            var name = function.TryGetProperty("name", out var nameElement)
+                ? nameElement.GetString() ?? ""
+                : "";
+            var arguments = function.TryGetProperty("arguments", out var argumentsElement)
+                ? argumentsElement.ValueKind == JsonValueKind.String
+                    ? argumentsElement.GetString() ?? ""
+                    : argumentsElement.GetRawText()
+                : "{}";
+            fragments.Add(new BackendToolCallFragment(index++.ToString(), "", name, arguments));
+        }
+
+        return fragments;
     }
 }
