@@ -39,6 +39,7 @@ public sealed class RagSearchResult
 {
     public string SourcePath { get; init; } = "";
     public string SourceName => Path.GetFileName(SourcePath);
+    public string Display => $"{SourceName} · chunk {ChunkIndex + 1} · {Score:F2}";
     public int ChunkIndex { get; init; }
     public string Text { get; init; } = "";
     public double Score { get; init; }

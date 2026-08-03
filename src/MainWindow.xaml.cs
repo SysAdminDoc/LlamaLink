@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private readonly string _promptLibraryPath;
     private readonly string _ragIndexPath;
     private RagIndex _ragIndex = new();
+    private List<RagSearchResult> _lastRagMatches = new();
     private bool _ragIndexing;
     private CancellationTokenSource? _serverUpdateCts;
     private LlamaServerRelease? _latestServerRelease;
@@ -1301,6 +1302,36 @@ public partial class MainWindow : Window
             : $"{sources.Count} document{(sources.Count == 1 ? "" : "s")} · {_ragIndex.ChunkCount} chunks · local embeddings";
     }
 
+    private void ClearRagRetrieval()
+    {
+        _lastRagMatches.Clear();
+        RagRetrievedList.ItemsSource = null;
+        RagSelectedSourceLabel.Text = "No retrieval selected.";
+        RagExcerptViewer.Clear();
+    }
+
+    private void RefreshRagViewer()
+    {
+        RagRetrievedList.ItemsSource = _lastRagMatches.ToList();
+        if (_lastRagMatches.Count > 0)
+            RagRetrievedList.SelectedIndex = 0;
+        else
+            ClearRagRetrieval();
+    }
+
+    private void RagRetrieved_Selected(object sender, SelectionChangedEventArgs e)
+    {
+        if (RagRetrievedList.SelectedItem is not RagSearchResult result)
+        {
+            RagSelectedSourceLabel.Text = "No retrieval selected.";
+            RagExcerptViewer.Clear();
+            return;
+        }
+
+        RagSelectedSourceLabel.Text = $"{result.SourceName} · chunk {result.ChunkIndex + 1} · relevance {result.Score:F2}";
+        RagExcerptViewer.Text = result.Text;
+    }
+
     private void RagAdd_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
@@ -1340,6 +1371,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        ClearRagRetrieval();
         _ragIndexing = true;
         RagAddBtn.IsEnabled = false;
         RagClearBtn.IsEnabled = false;
@@ -1372,6 +1404,7 @@ public partial class MainWindow : Window
         if (_ragIndexing)
             return;
 
+        ClearRagRetrieval();
         _ragIndex.Clear();
         RagIndexStore.Save(_ragIndexPath, _ragIndex);
         RefreshRagSources();
@@ -1387,7 +1420,10 @@ public partial class MainWindow : Window
         }).ToList();
 
         if (RagEnabledCheck.IsChecked != true || _ragIndex.ChunkCount == 0)
+        {
+            ClearRagRetrieval();
             return messages;
+        }
 
         var query = messages.LastOrDefault(message =>
             string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))?.Content;
@@ -1395,10 +1431,13 @@ public partial class MainWindow : Window
         var matches = _ragIndex.Search(query ?? "", topK);
         if (matches.Count == 0)
         {
+            ClearRagRetrieval();
             RagStatusLabel.Text = "RAG enabled, but no indexed excerpt matched this question.";
             return messages;
         }
 
+        _lastRagMatches = matches;
+        RefreshRagViewer();
         var context = RagIndex.FormatContext(matches);
         var system = messages.FirstOrDefault(message =>
             string.Equals(message.Role, "system", StringComparison.OrdinalIgnoreCase));

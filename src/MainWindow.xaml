@@ -357,6 +357,16 @@
                                 <TextBlock x:Name="RagStatusLabel" Foreground="{StaticResource Overlay0Brush}"
                                            FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
                                            Text="Drop documents here to build a local index."/>
+                                <TextBlock Text="Last retrieved excerpts" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" Margin="0,7,0,3"/>
+                                <ListBox x:Name="RagRetrievedList" Height="68" DisplayMemberPath="Display"
+                                         SelectionChanged="RagRetrieved_Selected"/>
+                                <TextBlock x:Name="RagSelectedSourceLabel" Foreground="{StaticResource PeachBrush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,5,0,2"
+                                           Text="No retrieval selected."/>
+                                <TextBox x:Name="RagExcerptViewer" IsReadOnly="True" AcceptsReturn="True"
+                                         TextWrapping="Wrap" Height="92" VerticalScrollBarVisibility="Auto"
+                                         Padding="6"/>
                             </StackPanel>
                         </GroupBox>
 
