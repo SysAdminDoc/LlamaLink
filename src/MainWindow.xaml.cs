@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private Process? _speechRecorder;
     private string? _speechAudioPath;
     private CancellationTokenSource? _speechCts;
+    private CancellationTokenSource? _imageGenCts;
     private CancellationTokenSource? _streamCts;
     private CancellationTokenSource? _downloadCts;
     private bool _streaming;
@@ -1873,6 +1874,77 @@ public partial class MainWindow : Window
         }
     }
 
+    private ImageGenerationSettings GetImageGenerationSettings()
+    {
+        var outputDirectory = ImageGenOutputBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+            outputDirectory = Path.Combine(Path.GetDirectoryName(_settingsPath)!, "generated");
+        return new ImageGenerationSettings(
+            ImageGenExeBox.Text.Trim(),
+            ImageGenModelBox.Text.Trim(),
+            outputDirectory,
+            int.TryParse(ImageGenStepsBox.Text, out var steps) ? steps : 20,
+            int.TryParse(ImageGenWidthBox.Text, out var width) ? width : 512,
+            int.TryParse(ImageGenHeightBox.Text, out var height) ? height : 512);
+    }
+
+    private async Task GenerateImageCommandAsync(string prompt)
+    {
+        if (ImageGenEnabledCheck.IsChecked != true)
+        {
+            ImageGenStatusLabel.Text = "Enable image generation before using /image.";
+            return;
+        }
+        if (_pendingImages.Count > 0)
+        {
+            ImageGenStatusLabel.Text = "Send or remove pending image attachments before using /image.";
+            return;
+        }
+
+        prompt = prompt.Trim();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            ImageGenStatusLabel.Text = "Use /image followed by a prompt.";
+            return;
+        }
+
+        var command = $"/image {prompt}";
+        InputBox.Clear();
+        _messages.Add(new() { ["role"] = "user", ["content"] = command });
+        _chatMessages.Add(MakeChatVM("user", command));
+        EmptyState.Visibility = Visibility.Collapsed;
+        ScrollChatToBottom();
+        SaveCurrentChat();
+
+        _imageGenCts?.Cancel();
+        _imageGenCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        ImageGenStatusLabel.Text = "Generating image...";
+        try
+        {
+            var result = await ImageGenerationService.GenerateAsync(
+                GetImageGenerationSettings(),
+                prompt,
+                _imageGenCts.Token);
+            if (result.Success && result.OutputPath is not null)
+            {
+                var content = $"Generated image:\n{result.OutputPath}";
+                _messages.Add(new() { ["role"] = "assistant", ["content"] = content });
+                _chatMessages.Add(MakeChatVM("assistant", content));
+                ImageGenStatusLabel.Text = $"Image generated: {result.OutputPath}";
+                SaveCurrentChat();
+            }
+            else
+            {
+                ImageGenStatusLabel.Text = result.Message;
+                StatusLabel.Text = result.Message;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            ImageGenStatusLabel.Text = "Image generation cancelled.";
+        }
+    }
+
     private void Send_Click(object sender, RoutedEventArgs e) => SendMessage();
     private void Regenerate_Click(object sender, RoutedEventArgs e) => SendMessage(regenerate: true);
     private void StopGen_Click(object sender, RoutedEventArgs e) => _streamCts?.Cancel();
@@ -1892,6 +1964,13 @@ public partial class MainWindow : Window
         var hasPendingImages = _pendingImages.Count > 0;
         if ((!regenerate && string.IsNullOrEmpty(text) && !hasPendingImages) || _streaming)
             return;
+
+        if (!regenerate && (text.Equals("/image", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("/image ", StringComparison.OrdinalIgnoreCase)))
+        {
+            await GenerateImageCommandAsync(text.Length > 6 ? text[6..] : "");
+            return;
+        }
 
         if (regenerate && hasPendingImages)
         {
@@ -3169,6 +3248,13 @@ public partial class MainWindow : Window
             SpeechPiperBox.Text = GetStr("speech_piper");
             SpeechPiperVoiceBox.Text = GetStr("speech_piper_voice");
             SpeechMicBox.Text = GetStr("speech_microphone", "default");
+            ImageGenEnabledCheck.IsChecked = GetBool("image_generation_enabled", false);
+            ImageGenExeBox.Text = GetStr("image_generation_exe");
+            ImageGenModelBox.Text = GetStr("image_generation_model");
+            ImageGenOutputBox.Text = GetStr("image_generation_output");
+            ImageGenStepsBox.Text = GetInt("image_generation_steps", 20).ToString();
+            ImageGenWidthBox.Text = GetInt("image_generation_width", 512).ToString();
+            ImageGenHeightBox.Text = GetInt("image_generation_height", 512).ToString();
             RagEnabledCheck.IsChecked = GetBool("rag_enabled", false);
             RagTopKBox.Text = GetInt("rag_top_k", 4).ToString();
             RagFolderBox.Text = GetStr("rag_folder");
@@ -3239,6 +3325,13 @@ public partial class MainWindow : Window
             ["speech_piper"] = SpeechPiperBox.Text,
             ["speech_piper_voice"] = SpeechPiperVoiceBox.Text,
             ["speech_microphone"] = SpeechMicBox.Text,
+            ["image_generation_enabled"] = ImageGenEnabledCheck.IsChecked == true,
+            ["image_generation_exe"] = ImageGenExeBox.Text,
+            ["image_generation_model"] = ImageGenModelBox.Text,
+            ["image_generation_output"] = ImageGenOutputBox.Text,
+            ["image_generation_steps"] = int.TryParse(ImageGenStepsBox.Text, out var imageSteps) ? Math.Clamp(imageSteps, 1, 100) : 20,
+            ["image_generation_width"] = int.TryParse(ImageGenWidthBox.Text, out var imageWidth) ? Math.Clamp(imageWidth, 128, 2048) : 512,
+            ["image_generation_height"] = int.TryParse(ImageGenHeightBox.Text, out var imageHeight) ? Math.Clamp(imageHeight, 128, 2048) : 512,
             ["rag_enabled"] = RagEnabledCheck.IsChecked == true,
             ["rag_top_k"] = int.TryParse(RagTopKBox.Text, out var ragTopK) ? Math.Clamp(ragTopK, 1, 12) : 4,
             ["rag_folder"] = RagFolderBox.Text,
@@ -3263,6 +3356,7 @@ public partial class MainWindow : Window
         _streamTimer.Stop();
         StopRagFolderWatch(report: false);
         _speechCts?.Cancel();
+        _imageGenCts?.Cancel();
         if (_speechRecorder is not null && !_speechRecorder.HasExited)
         {
             try { _speechRecorder.Kill(true); } catch { }

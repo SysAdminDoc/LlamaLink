@@ -318,6 +318,47 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Image generation (optional sd.cpp)">
+                            <StackPanel>
+                                <CheckBox x:Name="ImageGenEnabledCheck" Content="Enable /image commands"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Label Content="CLI" Width="50"/>
+                                    <TextBox x:Name="ImageGenExeBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Model" Width="50"/>
+                                    <TextBox x:Name="ImageGenModelBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Output" Width="50"/>
+                                    <TextBox x:Name="ImageGenOutputBox" VerticalContentAlignment="Center"
+                                             ToolTip="Generated PNG files are written here"/>
+                                </DockPanel>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <Label Content="Steps" FontSize="11"/>
+                                        <TextBox x:Name="ImageGenStepsBox" Text="20" VerticalContentAlignment="Center" Margin="0,2,3,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <Label Content="Width" FontSize="11"/>
+                                        <TextBox x:Name="ImageGenWidthBox" Text="512" VerticalContentAlignment="Center" Margin="2,2,2,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <Label Content="Height" FontSize="11"/>
+                                        <TextBox x:Name="ImageGenHeightBox" Text="512" VerticalContentAlignment="Center" Margin="3,2,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="ImageGenStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Type /image followed by a prompt in the composer."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── System Prompt ── -->
                         <GroupBox Header="System Prompt">
                             <TextBox x:Name="SystemPromptBox" AcceptsReturn="True" TextWrapping="Wrap"

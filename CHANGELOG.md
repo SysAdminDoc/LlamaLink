@@ -21,6 +21,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added opt-in, confirmation-gated web search through DuckDuckGo or a configured SearxNG proxy.
 - Added vision chat attachments with drag/drop image previews and multimodal OpenAI/Ollama payloads.
 - Added optional ffmpeg, whisper.cpp, and Piper speech adapters for hold-to-record transcription and WAV synthesis.
+- Added an optional `/image <prompt>` stable-diffusion.cpp command adapter with bounded local PNG output.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
