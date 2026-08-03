@@ -6,6 +6,7 @@ All notable changes to LlamaLink will be documented in this file.
 
 - Added an auto-quant recommender that compares local GGUF variants against available VRAM and RAM.
 - Added focused recommender tests and guarded WPF startup initialization.
+- Added saved server profiles for one-click model and inference-parameter switching.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

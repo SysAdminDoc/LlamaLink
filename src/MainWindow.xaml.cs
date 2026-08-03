@@ -46,6 +46,8 @@ public partial class MainWindow : Window
     private string? _hfSelectedRepo;
     private List<HfModelResult> _hfCachedResults = new();
     private Thread? _serverThread;
+    private readonly List<ServerProfile> _serverProfiles = new();
+    private bool _updatingProfiles;
 
     // ── Brushes for chat bubbles ─────────────────────────────────────────
     private static readonly SolidColorBrush UserAccent = new(Color.FromRgb(0x89, 0xB4, 0xFA));
@@ -143,6 +145,7 @@ public partial class MainWindow : Window
         ConnectBtn.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
         ModelGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ServerParamsGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
+        ProfileGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ── Browse dialogs ───────────────────────────────────────────────────
@@ -177,6 +180,7 @@ public partial class MainWindow : Window
 
     private void RefreshModels(string folder)
     {
+        var selectedPath = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
         ModelCombo.Items.Clear();
         if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
             return;
@@ -189,6 +193,14 @@ public partial class MainWindow : Window
                 Content = $"{model.name}  ({model.sizeGb:F1} GB)",
                 Tag = model.path
             });
+        }
+
+        if (!string.IsNullOrEmpty(selectedPath))
+        {
+            ModelCombo.SelectedItem = ModelCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag?.ToString(), selectedPath, StringComparison.OrdinalIgnoreCase));
         }
         if (models.Count > 0)
             StatusLabel.Text = $"Found {models.Count} model(s)";
@@ -227,6 +239,136 @@ public partial class MainWindow : Window
             ModelInfoLabel.Text = "";
             QuantRecommendationLabel.Text = "Select a model to compare its local quant variants.";
         }
+    }
+
+    private void ProfileCombo_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingProfiles || ProfileCombo.SelectedItem is not ServerProfile profile)
+            return;
+
+        ApplyServerProfile(profile);
+    }
+
+    private void SaveProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var name = ProfileNameBox.Text.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            ProfileStatusLabel.Text = "Enter a profile name first.";
+            return;
+        }
+
+        if (!TryParsePositiveInt(CtxBox.Text, out var contextSize)
+            || !TryParseNonNegativeInt(GpuBox.Text, out var gpuLayers)
+            || !TryParsePositiveInt(ThreadsBox.Text, out var threads))
+        {
+            ProfileStatusLabel.Text = "Context and threads must be positive; GPU layers cannot be negative.";
+            return;
+        }
+
+        var selectedModel = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
+        var profile = _serverProfiles.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        if (profile is null)
+        {
+            profile = new ServerProfile { Name = name };
+            _serverProfiles.Add(profile);
+        }
+
+        profile.Name = name;
+        profile.ModelPath = selectedModel;
+        profile.ContextSize = contextSize;
+        profile.GpuLayers = gpuLayers;
+        profile.Threads = threads;
+        profile.FlashAttention = FlashAttnCheck.IsChecked == true;
+        profile.Mlock = MlockCheck.IsChecked == true;
+
+        RefreshProfileCombo(profile.Name);
+        ProfileStatusLabel.Text = $"Saved profile '{profile.Name}'.";
+        SaveSettings();
+    }
+
+    private void DeleteProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProfileCombo.SelectedItem is not ServerProfile profile)
+        {
+            ProfileStatusLabel.Text = "Select a saved profile to delete.";
+            return;
+        }
+
+        _serverProfiles.Remove(profile);
+        RefreshProfileCombo();
+        ProfileStatusLabel.Text = $"Deleted profile '{profile.Name}'.";
+        SaveSettings();
+    }
+
+    private void RefreshProfileCombo(string? selectedName = null)
+    {
+        _updatingProfiles = true;
+        try
+        {
+            ProfileCombo.ItemsSource = null;
+            ProfileCombo.ItemsSource = _serverProfiles;
+            if (!string.IsNullOrEmpty(selectedName))
+            {
+                ProfileCombo.SelectedItem = _serverProfiles.FirstOrDefault(profile =>
+                    string.Equals(profile.Name, selectedName, StringComparison.OrdinalIgnoreCase));
+            }
+            else
+            {
+                ProfileCombo.SelectedIndex = -1;
+            }
+        }
+        finally
+        {
+            _updatingProfiles = false;
+        }
+    }
+
+    private void ApplyServerProfile(ServerProfile profile)
+    {
+        ProfileNameBox.Text = profile.Name;
+        CtxBox.Text = profile.ContextSize.ToString(CultureInfo.InvariantCulture);
+        GpuBox.Text = profile.GpuLayers.ToString(CultureInfo.InvariantCulture);
+        ThreadsBox.Text = profile.Threads.ToString(CultureInfo.InvariantCulture);
+        FlashAttnCheck.IsChecked = profile.FlashAttention;
+        MlockCheck.IsChecked = profile.Mlock;
+
+        if (!string.IsNullOrWhiteSpace(profile.ModelPath))
+        {
+            var folder = Path.GetDirectoryName(profile.ModelPath);
+            if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
+            {
+                ModelFolderBox.Text = folder;
+                var modelItem = ModelCombo.Items
+                    .OfType<ComboBoxItem>()
+                    .FirstOrDefault(item => string.Equals(
+                        item.Tag?.ToString(), profile.ModelPath, StringComparison.OrdinalIgnoreCase));
+                if (modelItem is not null)
+                    ModelCombo.SelectedItem = modelItem;
+            }
+        }
+
+        var serverRunning = _serverManaged && _serverProcess is { HasExited: false };
+        ProfileStatusLabel.Text = serverRunning
+            ? $"Applied '{profile.Name}'. Stop and start the server to use it."
+            : $"Applied '{profile.Name}'.";
+        StatusLabel.Text = serverRunning
+            ? "Profile applied; restart the server to use the new settings"
+            : $"Profile applied: {profile.Name}";
+    }
+
+    private static bool TryParsePositiveInt(string text, out int value)
+    {
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.CurrentCulture, out value)
+            && value > 0;
+    }
+
+    private static bool TryParseNonNegativeInt(string text, out int value)
+    {
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.CurrentCulture, out value)
+            && value >= 0;
     }
 
     private void RecommendQuant_Click(object sender, RoutedEventArgs e)
@@ -1345,10 +1487,16 @@ public partial class MainWindow : Window
 
             var managed = GetBool("managed_mode", true);
             ManagedCheck.IsChecked = managed;
+
+            _serverProfiles.Clear();
+            _serverProfiles.AddRange(ServerProfileStore.Read(root));
+            RefreshProfileCombo();
         }
         catch
         {
             ExePathBox.Text = FindLlamaServer();
+            _serverProfiles.Clear();
+            RefreshProfileCombo();
         }
     }
 
@@ -1375,6 +1523,7 @@ public partial class MainWindow : Window
             ["ext_url"] = ExtUrlBox.Text,
             ["managed_mode"] = ManagedCheck.IsChecked == true,
             ["selected_model"] = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "",
+            ["server_profiles"] = ServerProfileStore.ToJson(_serverProfiles),
         };
 
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);

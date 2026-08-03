@@ -155,6 +155,27 @@
                             </Grid>
                         </GroupBox>
 
+                        <!-- ── Server profiles ── -->
+                        <GroupBox x:Name="ProfileGroup" Header="Server profiles">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button Content="Save" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                            Click="SaveProfile_Click" Padding="8,4"/>
+                                    <TextBox x:Name="ProfileNameBox" Text="Default" VerticalContentAlignment="Center"
+                                             ToolTip="Name for the saved server configuration"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button Content="Delete" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                            Foreground="{StaticResource RedBrush}" Click="DeleteProfile_Click" Padding="8,4"/>
+                                    <ComboBox x:Name="ProfileCombo" DisplayMemberPath="Name"
+                                              SelectionChanged="ProfileCombo_Changed" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <TextBlock x:Name="ProfileStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Save the current model and server settings as a reusable profile."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Generation ── -->
                         <GroupBox Header="Generation">
                             <StackPanel>
