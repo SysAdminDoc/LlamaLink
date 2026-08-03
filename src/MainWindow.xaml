@@ -105,6 +105,31 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <!-- ── Auto-quant recommendation ── -->
+                        <GroupBox Header="Auto-quant recommendation">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Label Content="VRAM (GB)" ToolTip="Available GPU memory"/>
+                                <TextBox x:Name="VramBox" Text="8" Grid.Column="1" Margin="8,2" VerticalContentAlignment="Center"/>
+                                <Label Content="RAM (GB)" Grid.Row="1" ToolTip="Available system memory for CPU offload"/>
+                                <TextBox x:Name="RamBox" Text="16" Grid.Row="1" Grid.Column="1" Margin="8,2" VerticalContentAlignment="Center"/>
+                                <Button x:Name="RecommendQuantBtn" Content="Recommend" Grid.Row="0" Grid.Column="2" Grid.RowSpan="2"
+                                        Click="RecommendQuant_Click" Style="{StaticResource GhostButton}" Padding="8,4"/>
+                                <TextBlock x:Name="QuantRecommendationLabel" Grid.Row="2" Grid.ColumnSpan="3"
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11" TextWrapping="Wrap"
+                                           Margin="2,6,0,0" Text="Select a model to compare its local quant variants."/>
+                            </Grid>
+                        </GroupBox>
+
                         <!-- ── Server Params ── -->
                         <GroupBox x:Name="ServerParamsGroup" Header="Server Parameters">
                             <Grid>

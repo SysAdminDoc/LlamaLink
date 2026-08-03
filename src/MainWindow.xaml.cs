@@ -133,6 +133,8 @@ public partial class MainWindow : Window
 
     private void ManagedCheck_Changed(object sender, RoutedEventArgs e)
     {
+        if (ExeRow is null) return;
+
         bool managed = ManagedCheck.IsChecked == true;
         ExeRow.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ExtUrlRow.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
@@ -218,11 +220,82 @@ public partial class MainWindow : Window
         {
             var info = new FileInfo(path);
             ModelInfoLabel.Text = $"{info.Name} - {info.Length / (1024.0 * 1024 * 1024):F2} GB";
+            QuantRecommendationLabel.Text = "Select Recommend to compare local quant variants.";
         }
         else
         {
             ModelInfoLabel.Text = "";
+            QuantRecommendationLabel.Text = "Select a model to compare its local quant variants.";
         }
+    }
+
+    private void RecommendQuant_Click(object sender, RoutedEventArgs e)
+    {
+        var selectedPath = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag as string;
+        if (string.IsNullOrWhiteSpace(selectedPath) || !File.Exists(selectedPath))
+        {
+            QuantRecommendationLabel.Text = "Select a local GGUF model first.";
+            return;
+        }
+
+        if (!TryParseCapacity(VramBox.Text, out var vramGiB) || vramGiB < 0
+            || !TryParseCapacity(RamBox.Text, out var ramGiB) || ramGiB < 0)
+        {
+            QuantRecommendationLabel.Text = "Enter non-negative VRAM and RAM values in GB.";
+            return;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(selectedPath);
+            if (string.IsNullOrEmpty(directory))
+            {
+                QuantRecommendationLabel.Text = "The selected model folder could not be read.";
+                return;
+            }
+
+            var family = QuantRecommender.GetModelFamilyKey(Path.GetFileName(selectedPath));
+            var variants = Directory.EnumerateFiles(directory, "*.gguf", SearchOption.TopDirectoryOnly)
+                .Select(path => new
+                {
+                    Path = path,
+                    FileName = Path.GetFileName(path),
+                    Family = QuantRecommender.GetModelFamilyKey(Path.GetFileName(path))
+                })
+                .Where(file => string.Equals(file.Family, family, StringComparison.OrdinalIgnoreCase))
+                .Select(file =>
+                {
+                    var info = new FileInfo(file.Path);
+                    return new QuantModelFile(
+                        file.FileName,
+                        info.Length,
+                        QuantRecommender.ParseQuant(file.FileName),
+                        file.Path);
+                });
+
+            var result = QuantRecommender.Recommend(variants, vramGiB, ramGiB);
+            if (result.HasRecommendation)
+            {
+                var file = result.SelectedFile!;
+                QuantRecommendationLabel.Text =
+                    $"Recommended: {file.FileName} ({file.Quant}, {file.SizeGiB:F2} GiB)\n" +
+                    $"Estimated runtime memory: {result.EstimatedMemoryGiB!.Value:F2} GiB of {result.AvailableMemoryGiB:F2} GiB available.";
+            }
+            else
+            {
+                QuantRecommendationLabel.Text = result.Message;
+            }
+        }
+        catch (Exception ex)
+        {
+            QuantRecommendationLabel.Text = $"Could not inspect model variants: {ex.Message}";
+        }
+    }
+
+    private static bool TryParseCapacity(string text, out double value)
+    {
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value)
+            || double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
     // ── Server management ────────────────────────────────────────────────
@@ -1214,14 +1287,7 @@ public partial class MainWindow : Window
     }
 
     private static string ParseQuant(string filename)
-    {
-        var m = Regex.Match(filename, @"[.\-]((?:I?Q\d[\w_]*?))[.\-]", RegexOptions.IgnoreCase);
-        if (m.Success) return m.Groups[1].Value.ToUpper();
-        m = Regex.Match(filename, @"[.\-]((?:I?Q\d[\w_]*))\.", RegexOptions.IgnoreCase);
-        if (m.Success) return m.Groups[1].Value.ToUpper();
-        m = Regex.Match(filename, @"((?:I?Q\d[\w_]*))", RegexOptions.IgnoreCase);
-        return m.Success ? m.Groups[1].Value.ToUpper() : "";
-    }
+        => QuantRecommender.ParseQuant(filename);
 
     private static Dictionary<string, string> GetHfHeaders()
     {
@@ -1255,6 +1321,8 @@ public partial class MainWindow : Window
                 root.TryGetProperty(key, out var v) && v.TryGetInt32(out var i) ? i : def;
             bool GetBool(string key, bool def) =>
                 root.TryGetProperty(key, out var v) ? v.GetBoolean() : def;
+            double GetDouble(string key, double def) =>
+                root.TryGetProperty(key, out var v) && v.TryGetDouble(out var d) ? d : def;
 
             var exe = GetStr("exe_path");
             ExePathBox.Text = string.IsNullOrEmpty(exe) ? FindLlamaServer() : exe;
@@ -1263,6 +1331,8 @@ public partial class MainWindow : Window
             CtxBox.Text = GetInt("ctx_size", 4096).ToString();
             GpuBox.Text = GetInt("gpu_layers", 99).ToString();
             ThreadsBox.Text = GetInt("threads", Math.Max(1, Environment.ProcessorCount / 2)).ToString();
+            VramBox.Text = GetDouble("vram_gb", 8).ToString("0.##", CultureInfo.InvariantCulture);
+            RamBox.Text = GetDouble("ram_gb", 16).ToString("0.##", CultureInfo.InvariantCulture);
             TempSlider.Value = GetInt("temperature", 70);
             TopPSlider.Value = GetInt("top_p", 90);
             TopKBox.Text = GetInt("top_k", 40).ToString();
@@ -1292,6 +1362,8 @@ public partial class MainWindow : Window
             ["ctx_size"] = int.TryParse(CtxBox.Text, out var c) ? c : 4096,
             ["gpu_layers"] = int.TryParse(GpuBox.Text, out var g) ? g : 99,
             ["threads"] = int.TryParse(ThreadsBox.Text, out var t) ? t : 4,
+            ["vram_gb"] = TryParseCapacity(VramBox.Text, out var vram) ? vram : 8,
+            ["ram_gb"] = TryParseCapacity(RamBox.Text, out var ram) ? ram : 16,
             ["temperature"] = (int)TempSlider.Value,
             ["top_p"] = (int)TopPSlider.Value,
             ["top_k"] = int.TryParse(TopKBox.Text, out var k) ? k : 40,
