@@ -25,6 +25,7 @@
     <Compile Include="..\..\src\LocalRag.cs" Link="LocalRag.cs" />
     <Compile Include="..\..\src\WebSearch.cs" Link="WebSearch.cs" />
     <Compile Include="..\..\src\VisionSupport.cs" Link="VisionSupport.cs" />
+    <Compile Include="..\..\src\SpeechIntegration.cs" Link="SpeechIntegration.cs" />
   </ItemGroup>
 
 </Project>

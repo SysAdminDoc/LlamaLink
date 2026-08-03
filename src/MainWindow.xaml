@@ -274,6 +274,50 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Speech (optional local tools)">
+                            <StackPanel>
+                                <TextBlock Text="Hold Record to capture a 16 kHz mono WAV, then transcribe with whisper.cpp."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,5"/>
+                                <DockPanel Margin="0,2,0,0">
+                                    <Label Content="ffmpeg" Width="56"/>
+                                    <TextBox x:Name="SpeechFfmpegBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Whisper" Width="56"/>
+                                    <TextBox x:Name="SpeechWhisperBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Model" Width="56"/>
+                                    <TextBox x:Name="SpeechWhisperModelBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Piper" Width="56"/>
+                                    <TextBox x:Name="SpeechPiperBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Voice" Width="56"/>
+                                    <TextBox x:Name="SpeechPiperVoiceBox" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Mic" Width="56"/>
+                                    <TextBox x:Name="SpeechMicBox" Text="default" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                    <Button x:Name="SpeechRecordBtn" Content="Hold to record" Style="{StaticResource MauveButton}"
+                                            PreviewMouseLeftButtonDown="SpeechRecord_MouseDown"
+                                            PreviewMouseLeftButtonUp="SpeechRecord_MouseUp" Padding="10,5"/>
+                                    <Button x:Name="SpeechStopBtn" Content="Stop" Style="{StaticResource RedButton}"
+                                            Click="SpeechStop_Click" Padding="10,5" Margin="5,0,0,0" IsEnabled="False"/>
+                                    <Button Content="Make reply WAV" Style="{StaticResource GhostButton}"
+                                            Click="SpeechSynthesize_Click" Padding="10,5" Margin="5,0,0,0"/>
+                                </StackPanel>
+                                <TextBlock x:Name="SpeechStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Speech tools are optional and never invoked automatically."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── System Prompt ── -->
                         <GroupBox Header="System Prompt">
                             <TextBox x:Name="SystemPromptBox" AcceptsReturn="True" TextWrapping="Wrap"

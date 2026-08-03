@@ -48,6 +48,9 @@ public partial class MainWindow : Window
     private LlamaServerRelease? _latestServerRelease;
 
     private Process? _serverProcess;
+    private Process? _speechRecorder;
+    private string? _speechAudioPath;
+    private CancellationTokenSource? _speechCts;
     private CancellationTokenSource? _streamCts;
     private CancellationTokenSource? _downloadCts;
     private bool _streaming;
@@ -1306,6 +1309,145 @@ public partial class MainWindow : Window
         UpdateChatContextLabel();
         SaveCurrentChat();
         StatusLabel.Text = "Chat detached; its messages remain available for another server";
+    }
+
+    private SpeechToolPaths GetSpeechToolPaths()
+        => new(
+            SpeechFfmpegBox.Text.Trim(),
+            SpeechWhisperBox.Text.Trim(),
+            SpeechWhisperModelBox.Text.Trim(),
+            SpeechPiperBox.Text.Trim(),
+            SpeechPiperVoiceBox.Text.Trim(),
+            SpeechMicBox.Text.Trim());
+
+    private string GetSpeechOutputDirectory()
+    {
+        var directory = Path.Combine(Path.GetDirectoryName(_settingsPath)!, "speech");
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private void SpeechRecord_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_speechRecorder is not null)
+            return;
+
+        try
+        {
+            SaveSettings();
+            _speechAudioPath = Path.Combine(
+                GetSpeechOutputDirectory(),
+                $"recording_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N")[..8]}.wav");
+            _speechRecorder = SpeechToolRunner.StartRecording(GetSpeechToolPaths(), _speechAudioPath);
+            SpeechRecordBtn.IsEnabled = false;
+            SpeechStopBtn.IsEnabled = true;
+            SpeechStatusLabel.Text = "Recording... release the button or press Stop.";
+        }
+        catch (Exception ex)
+        {
+            _speechRecorder = null;
+            SpeechStatusLabel.Text = $"Unable to record: {ex.Message}";
+        }
+        e.Handled = true;
+    }
+
+    private async void SpeechRecord_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        await StopAndTranscribeSpeechAsync();
+        e.Handled = true;
+    }
+
+    private async void SpeechStop_Click(object sender, RoutedEventArgs e)
+        => await StopAndTranscribeSpeechAsync();
+
+    private async Task StopAndTranscribeSpeechAsync()
+    {
+        var recorder = _speechRecorder;
+        _speechRecorder = null;
+        SpeechRecordBtn.IsEnabled = true;
+        SpeechStopBtn.IsEnabled = false;
+        if (recorder is null)
+            return;
+
+        try
+        {
+            if (!recorder.HasExited)
+                recorder.Kill(true);
+            await recorder.WaitForExitAsync();
+        }
+        catch (Exception ex)
+        {
+            SpeechStatusLabel.Text = $"Recording stopped with an error: {ex.Message}";
+            return;
+        }
+        finally
+        {
+            recorder.Dispose();
+        }
+
+        if (string.IsNullOrWhiteSpace(_speechAudioPath) || !File.Exists(_speechAudioPath))
+        {
+            SpeechStatusLabel.Text = "No WAV was produced; check ffmpeg and the microphone name.";
+            return;
+        }
+
+        _speechCts?.Cancel();
+        _speechCts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        SpeechStatusLabel.Text = "Transcribing with whisper.cpp...";
+        try
+        {
+            var result = await SpeechToolRunner.TranscribeAsync(
+                GetSpeechToolPaths(),
+                _speechAudioPath,
+                _speechCts.Token);
+            if (result.Success && !string.IsNullOrWhiteSpace(result.Content))
+            {
+                InputBox.Text = string.IsNullOrWhiteSpace(InputBox.Text)
+                    ? result.Content
+                    : $"{InputBox.Text.Trim()}\n{result.Content}";
+                SpeechStatusLabel.Text = "Transcription inserted into the composer.";
+            }
+            else
+            {
+                SpeechStatusLabel.Text = result.Success ? "Whisper returned no text." : result.Content;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            SpeechStatusLabel.Text = "Speech transcription cancelled.";
+        }
+    }
+
+    private async void SpeechSynthesize_Click(object sender, RoutedEventArgs e)
+    {
+        var text = _messages.LastOrDefault(message => message["role"] == "assistant")?["content"];
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            SpeechStatusLabel.Text = "Generate an assistant response before making a WAV.";
+            return;
+        }
+
+        var outputPath = Path.Combine(
+            GetSpeechOutputDirectory(),
+            $"reply_{DateTime.Now:yyyyMMdd_HHmmss}_{Guid.NewGuid().ToString("N")[..8]}.wav");
+        _speechCts?.Cancel();
+        _speechCts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        SpeechStatusLabel.Text = "Synthesizing with Piper...";
+        try
+        {
+            var result = await SpeechToolRunner.SynthesizeAsync(
+                GetSpeechToolPaths(),
+                text,
+                outputPath,
+                _speechCts.Token);
+            SpeechStatusLabel.Text = result.Success
+                ? $"WAV created: {result.OutputPath}"
+                : result.Content;
+        }
+        catch (OperationCanceledException)
+        {
+            SpeechStatusLabel.Text = "Speech synthesis cancelled.";
+        }
     }
 
     private static string[] SupportedRagPaths(IEnumerable<string> paths)
@@ -3021,6 +3163,12 @@ public partial class MainWindow : Window
                 .FirstOrDefault(item => string.Equals(
                     item.Tag?.ToString(), webSearchProvider, StringComparison.OrdinalIgnoreCase))
                 ?? WebSearchProviderCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
+            SpeechFfmpegBox.Text = GetStr("speech_ffmpeg");
+            SpeechWhisperBox.Text = GetStr("speech_whisper");
+            SpeechWhisperModelBox.Text = GetStr("speech_whisper_model");
+            SpeechPiperBox.Text = GetStr("speech_piper");
+            SpeechPiperVoiceBox.Text = GetStr("speech_piper_voice");
+            SpeechMicBox.Text = GetStr("speech_microphone", "default");
             RagEnabledCheck.IsChecked = GetBool("rag_enabled", false);
             RagTopKBox.Text = GetInt("rag_top_k", 4).ToString();
             RagFolderBox.Text = GetStr("rag_folder");
@@ -3085,6 +3233,12 @@ public partial class MainWindow : Window
             ["tool_web_search"] = WebSearchToolCheck.IsChecked == true,
             ["web_search_provider"] = (WebSearchProviderCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "duckduckgo",
             ["web_search_endpoint"] = WebSearchEndpointBox.Text,
+            ["speech_ffmpeg"] = SpeechFfmpegBox.Text,
+            ["speech_whisper"] = SpeechWhisperBox.Text,
+            ["speech_whisper_model"] = SpeechWhisperModelBox.Text,
+            ["speech_piper"] = SpeechPiperBox.Text,
+            ["speech_piper_voice"] = SpeechPiperVoiceBox.Text,
+            ["speech_microphone"] = SpeechMicBox.Text,
             ["rag_enabled"] = RagEnabledCheck.IsChecked == true,
             ["rag_top_k"] = int.TryParse(RagTopKBox.Text, out var ragTopK) ? Math.Clamp(ragTopK, 1, 12) : 4,
             ["rag_folder"] = RagFolderBox.Text,
@@ -3108,6 +3262,13 @@ public partial class MainWindow : Window
         _healthTimer.Stop();
         _streamTimer.Stop();
         StopRagFolderWatch(report: false);
+        _speechCts?.Cancel();
+        if (_speechRecorder is not null && !_speechRecorder.HasExited)
+        {
+            try { _speechRecorder.Kill(true); } catch { }
+        }
+        _speechRecorder?.Dispose();
+        _speechRecorder = null;
         _streamCts?.Cancel();
         _downloadCts?.Cancel();
         _serverUpdateCts?.Cancel();
