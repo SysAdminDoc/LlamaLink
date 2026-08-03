@@ -14,6 +14,7 @@
     <PackageReference Include="MSTest.TestFramework" Version="3.6.3" />
     <Compile Include="..\..\src\QuantRecommendation.cs" Link="QuantRecommendation.cs" />
     <Compile Include="..\..\src\ServerProfiles.cs" Link="ServerProfiles.cs" />
+    <Compile Include="..\..\src\ChatHistory.cs" Link="ChatHistory.cs" />
   </ItemGroup>
 
 </Project>

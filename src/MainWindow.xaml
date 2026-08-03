@@ -347,8 +347,14 @@
                                         </StackPanel>
                                     </Button>
                                 </StackPanel>
-                                <Button Content="New Chat" Click="NewChat_Click" Style="{StaticResource GhostButton}"
-                                        VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="New Chat" Click="NewChat_Click" Style="{StaticResource GhostButton}"/>
+                                    <TextBlock x:Name="ChatContextLabel" Text="New conversation" Foreground="{StaticResource Overlay0Brush}"
+                                               FontSize="11" VerticalAlignment="Center" Margin="10,0,6,0"
+                                               TextTrimming="CharacterEllipsis" MaxWidth="270"/>
+                                    <Button x:Name="ChatServerActionBtn" Content="Continue here" Click="ChatServerAction_Click"
+                                            Style="{StaticResource GhostButton}" IsEnabled="False" Padding="8,4"/>
+                                </StackPanel>
                             </DockPanel>
                         </Grid>
                     </Border>

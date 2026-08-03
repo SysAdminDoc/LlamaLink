@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private int _tokenCount;
     private long _streamStartTime;
     private string? _currentChatFile;
+    private string? _chatAttachedContext;
     private bool _serverManaged;
     private string? _hfSelectedRepo;
     private List<HfModelResult> _hfCachedResults = new();
@@ -80,6 +81,7 @@ public partial class MainWindow : Window
 
         LoadSettings();
         RefreshChatHistory();
+        UpdateChatContextLabel();
 
         Closing += OnWindowClosing;
     }
@@ -650,6 +652,16 @@ public partial class MainWindow : Window
         ServerStatusLabel.Text = "Running";
         ServerDot.Fill = FindResource("GreenBrush") as SolidColorBrush;
         StatusLabel.Text = "Server is ready";
+
+        if (_messages.Count > 0
+            && !string.Equals(_chatAttachedContext, GetCurrentChatContext(), StringComparison.Ordinal))
+        {
+            AttachChatToCurrentServer();
+        }
+        else
+        {
+            UpdateChatContextLabel();
+        }
     }
 
     private void OnServerError(string msg)
@@ -670,6 +682,7 @@ public partial class MainWindow : Window
         ConnectBtn.IsEnabled = true;
         StopBtn.IsEnabled = false;
         StatusLabel.Text = "Server stopped";
+        UpdateChatContextLabel();
     }
 
     private async Task CheckServerHealth()
@@ -693,6 +706,86 @@ public partial class MainWindow : Window
     }
 
     // ── Chat ─────────────────────────────────────────────────────────────
+    private string GetCurrentChatContext()
+    {
+        if (!_serverManaged)
+            return ChatServerContext.ForExternal(GetServerUrl());
+
+        if (ProfileCombo.SelectedItem is ServerProfile profile && !string.IsNullOrWhiteSpace(profile.Name))
+            return ChatServerContext.ForProfile(profile.Name);
+
+        return ChatServerContext.ForLocal((ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "");
+    }
+
+    private bool IsServerReady => string.Equals(
+        ServerStatusLabel.Text, "Running", StringComparison.OrdinalIgnoreCase);
+
+    private bool AttachChatToCurrentServer()
+    {
+        if (!IsServerReady)
+        {
+            UpdateChatContextLabel();
+            StatusLabel.Text = "Start or connect to a server before continuing this chat";
+            return false;
+        }
+
+        var previousContext = _chatAttachedContext;
+        _chatAttachedContext = GetCurrentChatContext();
+        UpdateChatContextLabel();
+
+        if (_messages.Count > 0)
+        {
+            SaveCurrentChat();
+            StatusLabel.Text = previousContext is not null
+                && !string.Equals(previousContext, _chatAttachedContext, StringComparison.Ordinal)
+                ? $"Continued on {_chatAttachedContext}; {_messages.Count(m => m["role"] != "system")} messages preserved"
+                : $"Attached to {_chatAttachedContext}";
+        }
+
+        return true;
+    }
+
+    private void UpdateChatContextLabel()
+    {
+        if (_messages.Count == 0)
+        {
+            ChatContextLabel.Text = "New conversation";
+            ChatServerActionBtn.Content = "Continue here";
+            ChatServerActionBtn.IsEnabled = false;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_chatAttachedContext))
+        {
+            ChatContextLabel.Text = "Detached — conversation stays loaded";
+            ChatServerActionBtn.Content = "Continue here";
+            ChatServerActionBtn.IsEnabled = IsServerReady;
+        }
+        else
+        {
+            var count = _messages.Count(message => message["role"] != "system");
+            ChatContextLabel.Text = $"{_chatAttachedContext} · {count} msgs";
+            ChatServerActionBtn.Content = "Detach";
+            ChatServerActionBtn.IsEnabled = true;
+        }
+    }
+
+    private void ChatServerAction_Click(object sender, RoutedEventArgs e)
+    {
+        if (_messages.Count == 0) return;
+
+        if (string.IsNullOrWhiteSpace(_chatAttachedContext))
+        {
+            AttachChatToCurrentServer();
+            return;
+        }
+
+        _chatAttachedContext = null;
+        UpdateChatContextLabel();
+        SaveCurrentChat();
+        StatusLabel.Text = "Chat detached; its messages remain available for another server";
+    }
+
     private void Send_Click(object sender, RoutedEventArgs e) => SendMessage();
     private void StopGen_Click(object sender, RoutedEventArgs e) => _streamCts?.Cancel();
 
@@ -709,6 +802,15 @@ public partial class MainWindow : Window
     {
         var text = InputBox.Text.Trim();
         if (string.IsNullOrEmpty(text) || _streaming)
+            return;
+
+        if (!IsServerReady)
+        {
+            StatusLabel.Text = "Start or connect to a server before sending a message";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_chatAttachedContext) && !AttachChatToCurrentServer())
             return;
 
         InputBox.Clear();
@@ -922,6 +1024,8 @@ public partial class MainWindow : Window
         TokenCountLabel.Text = "";
         SpeedLabel.Text = "";
         _currentChatFile = null;
+        _chatAttachedContext = null;
+        UpdateChatContextLabel();
         StatusLabel.Text = "New chat started";
     }
 
@@ -980,8 +1084,11 @@ public partial class MainWindow : Window
             _currentChatFile = Path.Combine(_chatHistoryDir, $"{ts}_{slug}.json");
         }
 
-        var data = new { messages = _messages, timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() };
-        File.WriteAllText(_currentChatFile, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
+        var json = ChatHistoryStore.Serialize(
+            _messages,
+            _chatAttachedContext,
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        File.WriteAllText(_currentChatFile, json);
         RefreshChatHistory();
     }
 
@@ -999,19 +1106,18 @@ public partial class MainWindow : Window
             try
             {
                 var json = File.ReadAllText(fpath);
-                using var doc = JsonDocument.Parse(json);
-                var msgs = doc.RootElement.GetProperty("messages");
+                var document = ChatHistoryStore.Deserialize(json);
                 string firstUser = Path.GetFileNameWithoutExtension(fpath);
                 int msgCount = 0;
 
-                foreach (var m in msgs.EnumerateArray())
+                foreach (var message in document.Messages)
                 {
-                    var role = m.GetProperty("role").GetString();
+                    var role = message.Role;
                     if (role == "system") continue;
                     msgCount++;
                     if (role == "user" && firstUser == Path.GetFileNameWithoutExtension(fpath))
                     {
-                        var c = m.GetProperty("content").GetString() ?? "";
+                        var c = message.Content;
                         firstUser = c.Length > 60 ? c[..60] : c;
                     }
                 }
@@ -1035,26 +1141,27 @@ public partial class MainWindow : Window
         try
         {
             var json = File.ReadAllText(fpath);
-            using var doc = JsonDocument.Parse(json);
-            var msgs = doc.RootElement.GetProperty("messages");
+            var document = ChatHistoryStore.Deserialize(json);
 
             _messages.Clear();
             _chatMessages.Clear();
             EmptyState.Visibility = Visibility.Collapsed;
 
-            foreach (var m in msgs.EnumerateArray())
+            foreach (var message in document.Messages)
             {
-                var role = m.GetProperty("role").GetString()!;
-                var content = m.GetProperty("content").GetString()!;
+                var role = message.Role;
+                var content = message.Content;
                 _messages.Add(new() { ["role"] = role, ["content"] = content });
                 _chatMessages.Add(MakeChatVM(role, content));
             }
 
             _currentChatFile = fpath;
+            _chatAttachedContext = document.ServerContext;
             var msgCount = _messages.Count(m => m["role"] != "system");
             TokenCountLabel.Text = $"{msgCount} messages";
             SpeedLabel.Text = "";
             StatusLabel.Text = $"Loaded chat: {Path.GetFileName(fpath)}";
+            UpdateChatContextLabel();
             ScrollChatToBottom();
         }
         catch (Exception ex)
