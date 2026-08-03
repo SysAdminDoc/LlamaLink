@@ -56,6 +56,21 @@
                                     <TextBox x:Name="ExtUrlBox" Text="http://127.0.0.1:8080" VerticalContentAlignment="Center"/>
                                 </DockPanel>
 
+                                <DockPanel x:Name="ExtBackendRow" Margin="0,6,0,0" Visibility="Collapsed">
+                                    <Label Content="Backend" Width="54"/>
+                                    <ComboBox x:Name="BackendCombo" SelectionChanged="Backend_Changed" VerticalContentAlignment="Center">
+                                        <ComboBoxItem Content="OpenAI-compatible" Tag="openai" IsSelected="True"/>
+                                        <ComboBoxItem Content="Ollama" Tag="ollama"/>
+                                        <ComboBoxItem Content="KoboldCpp" Tag="koboldcpp"/>
+                                        <ComboBoxItem Content="text-generation-webui" Tag="textgen"/>
+                                    </ComboBox>
+                                </DockPanel>
+
+                                <DockPanel x:Name="ExtModelRow" Margin="0,6,0,0" Visibility="Collapsed">
+                                    <Label Content="Model" Width="54"/>
+                                    <TextBox x:Name="ExtModelBox" Text="llama3.2" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -102,7 +117,8 @@
                                                VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                 </DockPanel>
                                 <ComboBox x:Name="ServerUpdateAssetCombo" DisplayMemberPath="DisplayName"
-                                          Margin="0,6,0,0" ToolTip="Compatible Windows x64 release asset"/>
+                                          Margin="0,6,0,0" ToolTip="Compatible Windows x64 release asset"
+                                          SelectionChanged="ServerUpdateAsset_Changed"/>
                                 <DockPanel Margin="0,6,0,0">
                                     <Button x:Name="DownloadServerUpdateBtn" Content="Download" Style="{StaticResource GreenButton}"
                                             Click="DownloadServerUpdate_Click" Padding="10,4" IsEnabled="False"/>

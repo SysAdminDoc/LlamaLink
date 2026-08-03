@@ -144,6 +144,8 @@ public partial class MainWindow : Window
         bool managed = ManagedCheck.IsChecked == true;
         ExeRow.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ExtUrlRow.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
+        ExtBackendRow.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
+        ExtModelRow.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
         PortRow.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         StartBtn.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ConnectBtn.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
@@ -151,6 +153,16 @@ public partial class MainWindow : Window
         ServerParamsGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ProfileGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ServerUpdateGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void Backend_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (BackendCombo.SelectedItem is not ComboBoxItem item) return;
+        if (BackendAdapter.Parse(item.Tag?.ToString() ?? "") == LlamaBackendKind.Ollama
+            && string.IsNullOrWhiteSpace(ExtModelBox.Text))
+        {
+            ExtModelBox.Text = "llama3.2";
+        }
     }
 
     // ── Browse dialogs ───────────────────────────────────────────────────
@@ -457,6 +469,7 @@ public partial class MainWindow : Window
         ServerUpdateStatusLabel.Text = "Checking GitHub for the latest compatible llama.cpp build...";
         _serverUpdateCts?.Cancel();
         _serverUpdateCts = new CancellationTokenSource();
+        CancelServerUpdateBtn.Visibility = Visibility.Visible;
 
         try
         {
@@ -632,11 +645,23 @@ public partial class MainWindow : Window
         _serverUpdateCts?.Cancel();
     }
 
+    private void ServerUpdateAsset_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!CheckServerUpdateBtn.IsEnabled) return;
+        DownloadServerUpdateBtn.IsEnabled = ServerUpdateAssetCombo.SelectedItem is LlamaServerAsset;
+    }
+
     private string GetServerUrl()
     {
         if (_serverManaged)
             return $"http://127.0.0.1:{PortBox.Text.Trim()}";
         return ExtUrlBox.Text.Trim().TrimEnd('/');
+    }
+
+    private LlamaBackendKind GetSelectedBackend()
+    {
+        if (_serverManaged) return LlamaBackendKind.LlamaCpp;
+        return BackendAdapter.Parse((BackendCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "openai");
     }
 
     private static string FindLlamaServer()
@@ -790,13 +815,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        var backend = GetSelectedBackend();
+
         ServerStatusLabel.Text = "Connecting...";
         ServerDot.Fill = FindResource("YellowBrush") as SolidColorBrush;
         StatusLabel.Text = $"Connecting to {url}...";
 
         try
         {
-            var resp = await _http.GetAsync($"{url}/health", new CancellationTokenSource(5000).Token);
+            var healthUrl = BackendAdapter.BuildEndpoint(url, BackendAdapter.GetHealthPath(backend));
+            var resp = await _http.GetAsync(healthUrl, new CancellationTokenSource(5000).Token);
             if (resp.IsSuccessStatusCode)
             {
                 _serverManaged = false;
@@ -804,7 +832,7 @@ public partial class MainWindow : Window
                 StopBtn.IsEnabled = true;
                 OnServerReady();
                 _healthTimer.Start();
-                AppendServerLog($"Connected to external server: {url}");
+                AppendServerLog($"Connected to {backend}: {url}");
             }
             else
             {
@@ -879,7 +907,8 @@ public partial class MainWindow : Window
         if (_serverManaged) return;
         try
         {
-            var resp = await _http.GetAsync($"{GetServerUrl()}/health",
+            var healthUrl = BackendAdapter.BuildEndpoint(GetServerUrl(), BackendAdapter.GetHealthPath(GetSelectedBackend()));
+            var resp = await _http.GetAsync(healthUrl,
                 new CancellationTokenSource(3000).Token);
             if (!resp.IsSuccessStatusCode)
             {
@@ -1002,6 +1031,14 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(_chatAttachedContext) && !AttachChatToCurrentServer())
             return;
 
+        var backend = GetSelectedBackend();
+        var model = _serverManaged ? "" : ExtModelBox.Text.Trim();
+        if (BackendAdapter.RequiresModel(backend) && string.IsNullOrWhiteSpace(model))
+        {
+            StatusLabel.Text = "Enter the Ollama model name before sending a message";
+            return;
+        }
+
         InputBox.Clear();
 
         if (_messages.Count == 0)
@@ -1025,17 +1062,13 @@ public partial class MainWindow : Window
         int.TryParse(TopKBox.Text, out int topK);
         int.TryParse(MaxTokensBox.Text, out int maxTokens);
 
-        var payload = new Dictionary<string, object>
+        var payloadMessages = _messages.Select(message => new ChatHistoryMessage
         {
-            ["messages"] = _messages.Select(m => new { role = m["role"], content = m["content"] }).ToArray(),
-            ["stream"] = true,
-            ["temperature"] = temp,
-            ["top_p"] = topP,
-            ["top_k"] = topK,
-            ["repeat_penalty"] = repPenalty
-        };
-        if (maxTokens > 0)
-            payload["max_tokens"] = maxTokens;
+            Role = message["role"],
+            Content = message["content"],
+        }).ToList();
+        var payload = BackendAdapter.BuildPayload(
+            backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens);
 
         _streaming = true;
         _streamBuffer = "";
@@ -1057,7 +1090,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var url = $"{GetServerUrl()}/v1/chat/completions";
+            var url = BackendAdapter.BuildEndpoint(GetServerUrl(), BackendAdapter.GetChatPath(backend));
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -1074,29 +1107,16 @@ public partial class MainWindow : Window
 
                 var line = await reader.ReadLineAsync(_streamCts.Token);
                 if (line == null) break;
-                if (!line.StartsWith("data: ")) continue;
+                var part = BackendAdapter.ParseStreamLine(backend, line);
+                if (part is null) continue;
+                if (part.Done) break;
 
-                var data = line[6..];
-                if (data.Trim() == "[DONE]") break;
-
-                try
+                if (!string.IsNullOrEmpty(part.Content))
                 {
-                    using var doc = JsonDocument.Parse(data);
-                    var delta = doc.RootElement
-                        .GetProperty("choices")[0]
-                        .GetProperty("delta");
-                    if (delta.TryGetProperty("content", out var tokenEl))
-                    {
-                        var token = tokenEl.GetString();
-                        if (!string.IsNullOrEmpty(token))
-                        {
-                            _streamBuffer += token;
-                            _tokenCount++;
-                            _streamDirty = true;
-                        }
-                    }
+                    _streamBuffer += part.Content;
+                    _tokenCount++;
+                    _streamDirty = true;
                 }
-                catch { }
             }
 
             OnResponseDone();
@@ -1780,6 +1800,13 @@ public partial class MainWindow : Window
             FlashAttnCheck.IsChecked = GetBool("flash_attn", true);
             MlockCheck.IsChecked = GetBool("mlock", false);
             ExtUrlBox.Text = GetStr("ext_url", "http://127.0.0.1:8080");
+            ExtModelBox.Text = GetStr("external_model", "llama3.2");
+            var backendTag = GetStr("backend", "openai");
+            BackendCombo.SelectedItem = BackendCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag?.ToString(), backendTag, StringComparison.OrdinalIgnoreCase))
+                ?? BackendCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
 
             var managed = GetBool("managed_mode", true);
             ManagedCheck.IsChecked = managed;
@@ -1817,6 +1844,8 @@ public partial class MainWindow : Window
             ["flash_attn"] = FlashAttnCheck.IsChecked == true,
             ["mlock"] = MlockCheck.IsChecked == true,
             ["ext_url"] = ExtUrlBox.Text,
+            ["external_model"] = ExtModelBox.Text,
+            ["backend"] = (BackendCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "openai",
             ["managed_mode"] = ManagedCheck.IsChecked == true,
             ["selected_model"] = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "",
             ["server_profiles"] = ServerProfileStore.ToJson(_serverProfiles),
@@ -1837,6 +1866,7 @@ public partial class MainWindow : Window
         _streamTimer.Stop();
         _streamCts?.Cancel();
         _downloadCts?.Cancel();
+        _serverUpdateCts?.Cancel();
 
         if (_serverProcess != null && !_serverProcess.HasExited)
         {

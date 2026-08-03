@@ -9,6 +9,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added saved server profiles for one-click model and inference-parameter switching.
 - Added detachable chat context metadata so loaded conversations can continue on another profile or endpoint.
 - Added a llama.cpp release updater with hardware-aware Windows x64 asset selection and safe ZIP downloads.
+- Added backend adapters for Ollama, KoboldCpp, and text-generation-webui with automatic endpoint and stream translation.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
