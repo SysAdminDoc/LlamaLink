@@ -19,6 +19,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added a selectable RAG excerpt viewer with source, chunk, and relevance highlighting.
 - Added persisted folder watching with debounced re-indexing and removal of deleted document sources.
 - Added opt-in, confirmation-gated web search through DuckDuckGo or a configured SearxNG proxy.
+- Added vision chat attachments with drag/drop image previews and multimodal OpenAI/Ollama payloads.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

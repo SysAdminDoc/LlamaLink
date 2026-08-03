@@ -86,11 +86,9 @@ public static class BackendAdapter
     {
         ArgumentNullException.ThrowIfNull(messages);
 
-        var messagePayload = messages.Select(message => new
-        {
-            role = message.Role,
-            content = message.Content,
-        }).ToArray();
+        var messagePayload = messages
+            .Select(message => BuildMessagePayload(backend, message))
+            .ToArray();
 
         if (backend == LlamaBackendKind.Ollama)
         {
@@ -127,6 +125,65 @@ public static class BackendAdapter
         if (tools is { Count: > 0 })
             payload["tools"] = tools.Select(tool => tool.ToPayload()).ToArray();
         return payload;
+    }
+
+    private static Dictionary<string, object> BuildMessagePayload(
+        LlamaBackendKind backend,
+        ChatHistoryMessage message)
+    {
+        var imageData = new List<(ChatImageAttachment Attachment, string Base64)>();
+        foreach (var attachment in message.Images)
+        {
+            if (VisionImageStore.TryRead(attachment, out var base64))
+                imageData.Add((attachment, base64));
+        }
+
+        var content = message.Content;
+        if (imageData.Count < message.Images.Count)
+            content += $"\n[Unavailable image attachments: {message.Images.Count - imageData.Count}]";
+
+        if (imageData.Count == 0)
+            return new Dictionary<string, object>
+            {
+                ["role"] = message.Role,
+                ["content"] = content,
+            };
+
+        if (backend == LlamaBackendKind.Ollama)
+        {
+            return new Dictionary<string, object>
+            {
+                ["role"] = message.Role,
+                ["content"] = content,
+                ["images"] = imageData.Select(image => image.Base64).ToArray(),
+            };
+        }
+
+        var parts = new List<object>
+        {
+            new Dictionary<string, object>
+            {
+                ["type"] = "text",
+                ["text"] = content,
+            },
+        };
+        foreach (var image in imageData)
+        {
+            parts.Add(new Dictionary<string, object>
+            {
+                ["type"] = "image_url",
+                ["image_url"] = new Dictionary<string, object>
+                {
+                    ["url"] = $"data:{image.Attachment.MimeType};base64,{image.Base64}",
+                },
+            });
+        }
+
+        return new Dictionary<string, object>
+        {
+            ["role"] = message.Role,
+            ["content"] = parts,
+        };
     }
 
     public static BackendStreamPart? ParseStreamLine(LlamaBackendKind backend, string line)

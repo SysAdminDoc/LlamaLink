@@ -528,20 +528,23 @@
                     <!-- Input area -->
                     <Border Grid.Row="2" Margin="12,0,12,12" Background="{StaticResource MantleBrush}"
                             CornerRadius="12" BorderBrush="{StaticResource Surface0Brush}" BorderThickness="1"
-                            Padding="4">
+                            Padding="4" AllowDrop="True" Drop="ChatImage_Drop" PreviewDragOver="ChatImage_DragOver">
                         <Grid>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <TextBox x:Name="InputBox" AcceptsReturn="True" TextWrapping="Wrap"
+                            <WrapPanel x:Name="ImageAttachmentPanel" Grid.Row="0" Margin="8,4,8,0" Visibility="Collapsed"/>
+
+                            <TextBox x:Name="InputBox" Grid.Row="1" AcceptsReturn="True" TextWrapping="Wrap"
                                      MaxHeight="120" VerticalScrollBarVisibility="Auto"
                                      Background="Transparent" BorderThickness="0" FontSize="13.5"
                                      KeyDown="InputBox_KeyDown" Padding="10,8"
                                      VerticalContentAlignment="Top"/>
 
-                            <DockPanel Grid.Row="1" Margin="8,0,4,4">
+                            <DockPanel Grid.Row="2" Margin="8,0,4,4">
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <TextBlock x:Name="SpeedLabel" Foreground="{StaticResource PeachBrush}"
                                                FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"

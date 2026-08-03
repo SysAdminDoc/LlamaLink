@@ -16,6 +16,9 @@ public sealed class ChatHistoryMessage
 
     [JsonPropertyName("content")]
     public string Content { get; set; } = "";
+
+    [JsonPropertyName("images")]
+    public List<ChatImageAttachment> Images { get; set; } = new();
 }
 
 public sealed class ChatHistoryDocument
@@ -53,16 +56,20 @@ public static class ChatHistoryStore
         string? branchId = null,
         string? parentChat = null,
         int? branchPoint = null,
-        string? branchName = null)
+        string? branchName = null,
+        IReadOnlyDictionary<int, IReadOnlyList<ChatImageAttachment>>? images = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
         var document = new ChatHistoryDocument
         {
-            Messages = messages.Select(message => new ChatHistoryMessage
+            Messages = messages.Select((message, index) => new ChatHistoryMessage
             {
                 Role = message.TryGetValue("role", out var role) ? role : "",
                 Content = message.TryGetValue("content", out var content) ? content : "",
+                Images = images is not null && images.TryGetValue(index, out var attachments)
+                    ? VisionImageStore.CloneAll(attachments).ToList()
+                    : new List<ChatImageAttachment>(),
             }).ToList(),
             Timestamp = timestamp,
             ServerContext = string.IsNullOrWhiteSpace(serverContext) ? null : serverContext,
@@ -83,6 +90,8 @@ public static class ChatHistoryStore
         var document = JsonSerializer.Deserialize<ChatHistoryDocument>(json)
             ?? throw new JsonException("Chat history document is empty.");
         document.Messages ??= new List<ChatHistoryMessage>();
+        foreach (var message in document.Messages)
+            message.Images ??= new List<ChatImageAttachment>();
         return document;
     }
 }

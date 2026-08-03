@@ -27,6 +27,8 @@ public partial class MainWindow : Window
     // ── State ────────────────────────────────────────────────────────────
     private readonly ObservableCollection<ChatMessageVM> _chatMessages = new();
     private readonly List<Dictionary<string, string>> _messages = new();
+    private readonly Dictionary<int, IReadOnlyList<ChatImageAttachment>> _messageImages = new();
+    private readonly List<ChatImageAttachment> _pendingImages = new();
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private readonly DispatcherTimer _streamTimer;
     private readonly DispatcherTimer _healthTimer;
@@ -108,6 +110,7 @@ public partial class MainWindow : Window
         }
 
         ChatMessages.ItemsSource = _chatMessages;
+        RefreshImageAttachments();
 
         _streamTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
         _streamTimer.Tick += (_, _) => FlushStream();
@@ -1594,10 +1597,16 @@ public partial class MainWindow : Window
 
     private List<ChatHistoryMessage> BuildPayloadMessagesWithRag()
     {
-        var messages = _messages.Select(message => new ChatHistoryMessage
+        var messages = _messages.Select((message, index) =>
         {
-            Role = message["role"],
-            Content = message["content"],
+            var historyMessage = new ChatHistoryMessage
+            {
+                Role = message["role"],
+                Content = message["content"],
+            };
+            if (_messageImages.TryGetValue(index, out var images))
+                historyMessage.Images = VisionImageStore.CloneAll(images).ToList();
+            return historyMessage;
         }).ToList();
 
         if (RagEnabledCheck.IsChecked != true || _ragIndex.ChunkCount == 0)
@@ -1639,6 +1648,89 @@ public partial class MainWindow : Window
         return messages;
     }
 
+    private void RefreshImageAttachments()
+    {
+        if (ImageAttachmentPanel is null)
+            return;
+
+        ImageAttachmentPanel.Children.Clear();
+        ImageAttachmentPanel.Visibility = _pendingImages.Count == 0
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        foreach (var attachment in _pendingImages)
+        {
+            var removeButton = new Button
+            {
+                Content = $"× {attachment.DisplayName}",
+                Tag = attachment,
+                Padding = new Thickness(8, 3, 8, 3),
+                Margin = new Thickness(0, 0, 5, 4),
+                ToolTip = "Remove image attachment",
+                Style = (Style)FindResource("GhostButton"),
+            };
+            removeButton.Click += RemovePendingImage_Click;
+            ImageAttachmentPanel.Children.Add(removeButton);
+        }
+    }
+
+    private void ChatImage_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private void ChatImage_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+            AddPendingImages(paths);
+    }
+
+    private void AddPendingImages(IEnumerable<string> paths)
+    {
+        if (_streaming)
+        {
+            StatusLabel.Text = "Wait for the current response before attaching images";
+            return;
+        }
+
+        var added = 0;
+        var rejected = new List<string>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                var attachment = VisionImageStore.Create(path);
+                if (_pendingImages.Any(existing => string.Equals(existing.Path, attachment.Path, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                _pendingImages.Add(attachment);
+                added++;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                rejected.Add($"{Path.GetFileName(path)}: {ex.Message}");
+            }
+        }
+
+        RefreshImageAttachments();
+        if (added > 0)
+            StatusLabel.Text = $"Attached {added} image{(added == 1 ? "" : "s")} to the next message";
+        if (rejected.Count > 0)
+            StatusLabel.Text += $". Rejected: {string.Join(" | ", rejected)}";
+    }
+
+    private void RemovePendingImage_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ChatImageAttachment attachment })
+        {
+            _pendingImages.Remove(attachment);
+            RefreshImageAttachments();
+            StatusLabel.Text = "Image attachment removed";
+        }
+    }
+
     private void Send_Click(object sender, RoutedEventArgs e) => SendMessage();
     private void Regenerate_Click(object sender, RoutedEventArgs e) => SendMessage(regenerate: true);
     private void StopGen_Click(object sender, RoutedEventArgs e) => _streamCts?.Cancel();
@@ -1655,8 +1747,15 @@ public partial class MainWindow : Window
     private async void SendMessage(bool regenerate = false)
     {
         var text = InputBox.Text.Trim();
-        if ((!regenerate && string.IsNullOrEmpty(text)) || _streaming)
+        var hasPendingImages = _pendingImages.Count > 0;
+        if ((!regenerate && string.IsNullOrEmpty(text) && !hasPendingImages) || _streaming)
             return;
+
+        if (regenerate && hasPendingImages)
+        {
+            StatusLabel.Text = "Send the attached image before regenerating the previous response";
+            return;
+        }
 
         if (regenerate)
         {
@@ -1700,6 +1799,9 @@ public partial class MainWindow : Window
         }
         else
         {
+            var messageImages = VisionImageStore.CloneAll(_pendingImages);
+            if (string.IsNullOrWhiteSpace(text) && messageImages.Count > 0)
+                text = "Describe the attached image.";
             InputBox.Clear();
 
             if (_messages.Count == 0)
@@ -1713,7 +1815,11 @@ public partial class MainWindow : Window
             }
 
             _messages.Add(new() { ["role"] = "user", ["content"] = text });
-            _chatMessages.Add(MakeChatVM("user", text));
+            if (messageImages.Count > 0)
+                _messageImages[_messages.Count - 1] = messageImages;
+            _chatMessages.Add(MakeChatVM("user", FormatChatContent(text, messageImages)));
+            _pendingImages.Clear();
+            RefreshImageAttachments();
         }
         EmptyState.Visibility = Visibility.Collapsed;
         ScrollChatToBottom();
@@ -2043,6 +2149,7 @@ public partial class MainWindow : Window
         if (_messages.Count > 0)
             SaveCurrentChat();
         _messages.Clear();
+        _messageImages.Clear();
         _chatMessages.Clear();
         EmptyState.Visibility = Visibility.Visible;
         TokenCountLabel.Text = "";
@@ -2056,7 +2163,9 @@ public partial class MainWindow : Window
         _regeneratingOriginal = null;
         _toolCallAccumulator = null;
         _pendingToolCalls.Clear();
+        _pendingImages.Clear();
         ToolConfirmationPanel.Visibility = Visibility.Collapsed;
+        RefreshImageAttachments();
         RefreshForkMessageOptions();
         UpdateChatContextLabel();
         StatusLabel.Text = "New chat started";
@@ -2097,6 +2206,14 @@ public partial class MainWindow : Window
         };
     }
 
+    private static string FormatChatContent(string content, IReadOnlyList<ChatImageAttachment> images)
+    {
+        if (images.Count == 0)
+            return content;
+        var names = string.Join(", ", images.Select(image => image.DisplayName));
+        return $"{content}\n[Attached image{(images.Count == 1 ? "" : "s")}: {names}]";
+    }
+
     private void ScrollChatToBottom()
     {
         if (VisualTreeHelper.GetChildrenCount(ChatScroll) > 0)
@@ -2124,7 +2241,8 @@ public partial class MainWindow : Window
             _branchId,
             _parentChat,
             _branchPoint,
-            _branchName);
+            _branchName,
+            _messageImages);
         File.WriteAllText(_currentChatFile, json);
         RefreshChatHistory();
     }
@@ -2184,19 +2302,23 @@ public partial class MainWindow : Window
             var document = ChatHistoryStore.Deserialize(json);
 
             _messages.Clear();
+            _messageImages.Clear();
             _chatMessages.Clear();
+            _pendingImages.Clear();
             _regeneratingOriginal = null;
             _toolCallAccumulator = null;
             _pendingToolCalls.Clear();
             ToolConfirmationPanel.Visibility = Visibility.Collapsed;
             EmptyState.Visibility = Visibility.Collapsed;
 
-            foreach (var message in document.Messages)
+            foreach (var (message, index) in document.Messages.Select((message, index) => (message, index)))
             {
                 var role = message.Role;
                 var content = message.Content;
                 _messages.Add(new() { ["role"] = role, ["content"] = content });
-                _chatMessages.Add(MakeChatVM(role, content));
+                if (message.Images.Count > 0)
+                    _messageImages[index] = VisionImageStore.CloneAll(message.Images);
+                _chatMessages.Add(MakeChatVM(role, FormatChatContent(content, message.Images)));
             }
 
             _currentChatFile = fpath;
@@ -2209,6 +2331,7 @@ public partial class MainWindow : Window
             TokenCountLabel.Text = $"{msgCount} messages";
             SpeedLabel.Text = "";
             StatusLabel.Text = $"Loaded chat: {Path.GetFileName(fpath)}";
+            RefreshImageAttachments();
             RefreshForkMessageOptions();
             UpdateChatContextLabel();
             ScrollChatToBottom();
@@ -2396,10 +2519,13 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var source = _messages.Select(message => new ChatHistoryMessage
+            var source = _messages.Select((message, index) => new ChatHistoryMessage
             {
                 Role = message.TryGetValue("role", out var role) ? role : "",
                 Content = message.TryGetValue("content", out var content) ? content : "",
+                Images = _messageImages.TryGetValue(index, out var images)
+                    ? VisionImageStore.CloneAll(images).ToList()
+                    : new List<ChatImageAttachment>(),
             }).ToList();
             var branchMessages = ConversationBrancher.SliceThrough(source, option.Index);
             var branchName = Regex.Replace(BranchNameBox.Text.Trim(), @"\s+", " ");
@@ -2416,14 +2542,19 @@ public partial class MainWindow : Window
             _currentChatFile = branchPath;
 
             _messages.Clear();
+            _messageImages.Clear();
             _messages.AddRange(branchMessages.Select(message => new Dictionary<string, string>
             {
                 ["role"] = message.Role,
                 ["content"] = message.Content,
             }));
             _chatMessages.Clear();
-            foreach (var message in branchMessages)
-                _chatMessages.Add(MakeChatVM(message.Role, message.Content));
+            foreach (var (message, index) in branchMessages.Select((message, index) => (message, index)))
+            {
+                if (message.Images.Count > 0)
+                    _messageImages[index] = VisionImageStore.CloneAll(message.Images);
+                _chatMessages.Add(MakeChatVM(message.Role, FormatChatContent(message.Content, message.Images)));
+            }
 
             EmptyState.Visibility = _messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             TokenCountLabel.Text = $"{_messages.Count(m => m["role"] != "system")} messages";

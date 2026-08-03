@@ -20,7 +20,12 @@ public static class ConversationBrancher
 
         return messages
             .Take(inclusiveIndex + 1)
-            .Select(message => new ChatHistoryMessage { Role = message.Role, Content = message.Content })
+            .Select(message => new ChatHistoryMessage
+            {
+                Role = message.Role,
+                Content = message.Content,
+                Images = VisionImageStore.CloneAll(message.Images).ToList(),
+            })
             .ToList();
     }
 
