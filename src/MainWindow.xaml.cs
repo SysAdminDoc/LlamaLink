@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private string? _parentChat;
     private int? _branchPoint;
     private string? _branchName;
+    private Dictionary<string, string>? _regeneratingOriginal;
     private bool _serverManaged;
     private string? _hfSelectedRepo;
     private List<HfModelResult> _hfCachedResults = new();
@@ -1263,6 +1264,7 @@ public partial class MainWindow : Window
     }
 
     private void Send_Click(object sender, RoutedEventArgs e) => SendMessage();
+    private void Regenerate_Click(object sender, RoutedEventArgs e) => SendMessage(regenerate: true);
     private void StopGen_Click(object sender, RoutedEventArgs e) => _streamCts?.Cancel();
 
     private void InputBox_KeyDown(object sender, KeyEventArgs e)
@@ -1274,11 +1276,26 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void SendMessage()
+    private async void SendMessage(bool regenerate = false)
     {
         var text = InputBox.Text.Trim();
-        if (string.IsNullOrEmpty(text) || _streaming)
+        if ((!regenerate && string.IsNullOrEmpty(text)) || _streaming)
             return;
+
+        if (regenerate)
+        {
+            var history = _messages.Select(message => new ChatHistoryMessage
+            {
+                Role = message.TryGetValue("role", out var role) ? role : "",
+                Content = message.TryGetValue("content", out var content) ? content : "",
+            }).ToList();
+            if (!ChatRegenerator.CanRegenerate(history))
+            {
+                StatusLabel.Text = "A completed assistant response is required to regenerate";
+                RefreshForkMessageOptions();
+                return;
+            }
+        }
 
         if (!IsServerReady)
         {
@@ -1297,20 +1314,31 @@ public partial class MainWindow : Window
             return;
         }
 
-        InputBox.Clear();
-
-        if (_messages.Count == 0)
+        if (regenerate)
         {
-            var sysPrompt = SystemPromptBox.Text.Trim();
-            if (!string.IsNullOrEmpty(sysPrompt))
-            {
-                _messages.Add(new() { ["role"] = "system", ["content"] = sysPrompt });
-                _chatMessages.Add(MakeChatVM("system", sysPrompt));
-            }
+            _regeneratingOriginal = new Dictionary<string, string>(_messages[^1]);
+            _messages.RemoveAt(_messages.Count - 1);
+            if (_chatMessages.Count > 0 && _chatMessages[^1].RoleLabel == "Assistant")
+                _chatMessages.RemoveAt(_chatMessages.Count - 1);
+            RefreshForkMessageOptions();
         }
+        else
+        {
+            InputBox.Clear();
 
-        _messages.Add(new() { ["role"] = "user", ["content"] = text });
-        _chatMessages.Add(MakeChatVM("user", text));
+            if (_messages.Count == 0)
+            {
+                var sysPrompt = SystemPromptBox.Text.Trim();
+                if (!string.IsNullOrEmpty(sysPrompt))
+                {
+                    _messages.Add(new() { ["role"] = "system", ["content"] = sysPrompt });
+                    _chatMessages.Add(MakeChatVM("system", sysPrompt));
+                }
+            }
+
+            _messages.Add(new() { ["role"] = "user", ["content"] = text });
+            _chatMessages.Add(MakeChatVM("user", text));
+        }
         EmptyState.Visibility = Visibility.Collapsed;
         ScrollChatToBottom();
 
@@ -1440,6 +1468,7 @@ public partial class MainWindow : Window
 
         var toolCalls = _toolCallAccumulator?.Complete() ?? Array.Empty<ToolCallRequest>();
         _toolCallAccumulator = null;
+        var restoringRegeneration = _regeneratingOriginal is not null;
         var assistantContent = _streamBuffer;
         if (toolCalls.Count > 0)
         {
@@ -1454,6 +1483,7 @@ public partial class MainWindow : Window
         if (!string.IsNullOrEmpty(assistantContent))
         {
             _messages.Add(new() { ["role"] = "assistant", ["content"] = assistantContent });
+            _regeneratingOriginal = null;
 
             // Final update of assistant bubble
             if (_chatMessages.Count > 0)
@@ -1467,10 +1497,18 @@ public partial class MainWindow : Window
                 };
             }
         }
+        else
+        {
+            if (_chatMessages.Count > 0 && _chatMessages[^1].RoleLabel == "Assistant")
+                _chatMessages.RemoveAt(_chatMessages.Count - 1);
+            RestoreRegeneratedResponse();
+        }
 
         var msgCount = _messages.Count(m => m["role"] != "system");
         TokenCountLabel.Text = $"{msgCount} messages";
-        StatusLabel.Text = "Response complete";
+        StatusLabel.Text = restoringRegeneration && string.IsNullOrEmpty(assistantContent)
+            ? "No replacement response; previous response restored"
+            : "Response complete";
         ScrollChatToBottom();
 
         foreach (var call in toolCalls)
@@ -1571,6 +1609,26 @@ public partial class MainWindow : Window
         SendMessage();
     }
 
+    private void RestoreRegeneratedResponse()
+    {
+        if (_regeneratingOriginal is null)
+            return;
+
+        var original = _regeneratingOriginal;
+        _regeneratingOriginal = null;
+        var role = original.TryGetValue("role", out var rawRole) ? rawRole : "assistant";
+        var content = original.TryGetValue("content", out var rawContent) ? rawContent : "";
+        _messages.Add(new Dictionary<string, string>
+        {
+            ["role"] = role,
+            ["content"] = content,
+        });
+        _chatMessages.Add(MakeChatVM(role, content));
+        TokenCountLabel.Text = $"{_messages.Count(message => message["role"] != "system")} messages";
+        RefreshForkMessageOptions();
+        ScrollChatToBottom();
+    }
+
     private void OnChatError(string error)
     {
         _streamTimer.Stop();
@@ -1587,6 +1645,7 @@ public partial class MainWindow : Window
         // Remove the placeholder assistant message
         if (_chatMessages.Count > 0 && _chatMessages[^1].RoleLabel == "Assistant")
             _chatMessages.RemoveAt(_chatMessages.Count - 1);
+        RestoreRegeneratedResponse();
 
         // Show error as a system message
         _chatMessages.Add(new ChatMessageVM
@@ -1615,6 +1674,7 @@ public partial class MainWindow : Window
         _parentChat = null;
         _branchPoint = null;
         _branchName = null;
+        _regeneratingOriginal = null;
         _toolCallAccumulator = null;
         _pendingToolCalls.Clear();
         ToolConfirmationPanel.Visibility = Visibility.Collapsed;
@@ -1746,6 +1806,7 @@ public partial class MainWindow : Window
 
             _messages.Clear();
             _chatMessages.Clear();
+            _regeneratingOriginal = null;
             _toolCallAccumulator = null;
             _pendingToolCalls.Clear();
             ToolConfirmationPanel.Visibility = Visibility.Collapsed;
@@ -1781,7 +1842,7 @@ public partial class MainWindow : Window
 
     private void RefreshForkMessageOptions()
     {
-        if (ForkMessageCombo is null || ForkBranchBtn is null)
+        if (ForkMessageCombo is null || ForkBranchBtn is null || RegenerateBtn is null)
             return;
 
         var options = _messages
@@ -1804,6 +1865,11 @@ public partial class MainWindow : Window
         if (options.Count > 0)
             ForkMessageCombo.SelectedIndex = options.Count - 1;
         ForkBranchBtn.IsEnabled = options.Count > 0 && !_streaming && _pendingToolCalls.Count == 0;
+        RegenerateBtn.IsEnabled = !_streaming
+            && _pendingToolCalls.Count == 0
+            && _messages.Count > 0
+            && _messages[^1].TryGetValue("role", out var lastRole)
+            && string.Equals(lastRole, "assistant", StringComparison.OrdinalIgnoreCase);
         UpdateBranchStatusLabel();
     }
 

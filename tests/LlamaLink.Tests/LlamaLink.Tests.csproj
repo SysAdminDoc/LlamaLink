@@ -20,6 +20,7 @@
     <Compile Include="..\..\src\SafeTools.cs" Link="SafeTools.cs" />
     <Compile Include="..\..\src\PromptLibrary.cs" Link="PromptLibrary.cs" />
     <Compile Include="..\..\src\ConversationBranching.cs" Link="ConversationBranching.cs" />
+    <Compile Include="..\..\src\ChatRegeneration.cs" Link="ChatRegeneration.cs" />
   </ItemGroup>
 
 </Project>
