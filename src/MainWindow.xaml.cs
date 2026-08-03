@@ -77,6 +77,7 @@ public partial class MainWindow : Window
     private bool _serverManaged;
     private string? _hfSelectedRepo;
     private List<HfModelResult> _hfCachedResults = new();
+    private CancellationTokenSource? _hfCardCts;
     private Thread? _serverThread;
     private readonly List<ServerProfile> _serverProfiles = new();
     private bool _updatingProfiles;
@@ -3079,6 +3080,11 @@ public partial class MainWindow : Window
         HfSearchBtn.Content = "Searching...";
         HfModelGrid.ItemsSource = null;
         HfFilesGrid.ItemsSource = null;
+        _hfCardCts?.Cancel();
+        HfModelCardTitle.Text = "Select a model to view its README";
+        HfModelCardMeta.Text = "";
+        HfModelCardBox.Text = "";
+        HfModelCardStatusLabel.Text = "";
         HfResultCount.Text = "";
         HfFilesLabel.Text = "Select a model above to see available GGUF files";
 
@@ -3136,6 +3142,13 @@ public partial class MainWindow : Window
         HfFilesGrid.ItemsSource = null;
         HfFilesLabel.Text = $"Loading files from {model.Id}...";
         DlStatusLabel.Text = "";
+        _hfCardCts?.Cancel();
+        _hfCardCts = new CancellationTokenSource();
+        HfModelCardTitle.Text = model.Id;
+        HfModelCardMeta.Text = "";
+        HfModelCardBox.Text = "";
+        HfModelCardStatusLabel.Text = "Loading README from Hugging Face...";
+        _ = LoadHfModelCardAsync(model.Id, _hfCardCts.Token);
 
         try
         {
@@ -3188,6 +3201,43 @@ public partial class MainWindow : Window
         {
             HfFilesLabel.Text = "Error loading files";
             StatusLabel.Text = $"Failed to fetch files: {ex.Message}";
+        }
+    }
+
+    private async Task LoadHfModelCardAsync(string repoId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var url = ModelCardParser.BuildRawReadmeUrl(repoId);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            foreach (var header in GetHfHeaders())
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+            using var response = await _http.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            var markdown = await response.Content.ReadAsStringAsync(cancellationToken);
+            var card = ModelCardParser.Parse(repoId, markdown);
+            if (!string.Equals(_hfSelectedRepo, repoId, StringComparison.OrdinalIgnoreCase)) return;
+
+            HfModelCardTitle.Text = card.Title;
+            HfModelCardMeta.Text = string.IsNullOrWhiteSpace(card.Tags)
+                ? $"License: {card.License}"
+                : $"License: {card.License}  •  {card.Tags}";
+            HfModelCardBox.Text = card.RenderedMarkdown;
+            HfModelCardStatusLabel.Text =
+                $"README loaded from {url} ({markdown.Length:N0} source characters).";
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer model selection or window close superseded this request.
+        }
+        catch (Exception ex)
+        {
+            if (string.Equals(_hfSelectedRepo, repoId, StringComparison.OrdinalIgnoreCase))
+            {
+                HfModelCardBox.Text = "";
+                HfModelCardStatusLabel.Text = $"README unavailable: {ex.Message}";
+            }
         }
     }
 
@@ -3544,6 +3594,9 @@ public partial class MainWindow : Window
         _streamCts?.Cancel();
         _downloadCts?.Cancel();
         _serverUpdateCts?.Cancel();
+        _hfCardCts?.Cancel();
+        _hfCardCts?.Dispose();
+        _hfCardCts = null;
 
         if (_serverProcess != null && !_serverProcess.HasExited)
         {

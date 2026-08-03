@@ -743,6 +743,7 @@
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -804,8 +805,32 @@
                         </DataGrid>
                     </DockPanel>
 
+                    <GroupBox Grid.Row="5" Header="Model card" Margin="0,8,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <DockPanel>
+                                <TextBlock x:Name="HfModelCardMeta" DockPanel.Dock="Right"
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock x:Name="HfModelCardTitle" Text="Select a model to view its README"
+                                           Foreground="{StaticResource TextBrush}" FontWeight="SemiBold"/>
+                            </DockPanel>
+                            <TextBox x:Name="HfModelCardBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True"
+                                     TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                     HorizontalScrollBarVisibility="Auto" Margin="0,6,0,0" Padding="8"
+                                     FontFamily="Segoe UI" FontSize="12" Text=""/>
+                            <TextBlock x:Name="HfModelCardStatusLabel" Grid.Row="2"
+                                       Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                       TextWrapping="Wrap" Margin="2,5,0,0"/>
+                        </Grid>
+                    </GroupBox>
+
                     <!-- Download controls -->
-                    <DockPanel Grid.Row="5" Margin="0,8,0,0">
+                    <DockPanel Grid.Row="6" Margin="0,8,0,0">
                         <TextBlock x:Name="DlDestLabel" DockPanel.Dock="Right" VerticalAlignment="Center"
                                    Foreground="{StaticResource Overlay0Brush}" FontSize="11"/>
                         <Button x:Name="DlBtn" Content="Download" Style="{StaticResource GreenButton}"
@@ -814,9 +839,9 @@
                                 Height="32" Margin="6,0,0,0" Click="HfCancelDownload_Click" Visibility="Collapsed" Padding="16,4"/>
                     </DockPanel>
 
-                    <ProgressBar x:Name="DlProgress" Grid.Row="6" Margin="0,8,0,0" Visibility="Collapsed"/>
+                    <ProgressBar x:Name="DlProgress" Grid.Row="7" Margin="0,8,0,0" Visibility="Collapsed"/>
 
-                    <TextBlock x:Name="DlStatusLabel" Grid.Row="7" Margin="2,6,0,0"
+                    <TextBlock x:Name="DlStatusLabel" Grid.Row="8" Margin="2,6,0,0"
                                Foreground="{StaticResource Overlay0Brush}" FontSize="11"/>
                 </Grid>
             </TabItem>
