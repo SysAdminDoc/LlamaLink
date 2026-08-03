@@ -341,6 +341,18 @@
                         <GroupBox Header="Local RAG">
                             <StackPanel>
                                 <CheckBox x:Name="RagEnabledCheck" Content="Inject relevant local excerpts" IsChecked="False"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button Content="..." DockPanel.Dock="Right" Margin="5,0,0,0" Padding="9,5"
+                                            Click="RagBrowseFolder_Click" ToolTip="Choose a folder to keep indexed"/>
+                                    <TextBox x:Name="RagFolderBox" VerticalContentAlignment="Center"
+                                             ToolTip="Folder watcher includes PDF, Markdown, and text files"/>
+                                </DockPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                    <Button x:Name="RagWatchBtn" Content="Watch folder" Click="RagWatch_Click"
+                                            Style="{StaticResource MauveButton}" Padding="10,5"/>
+                                    <Button x:Name="RagStopWatchBtn" Content="Stop watching" Click="RagStopWatch_Click"
+                                            Style="{StaticResource GhostButton}" Padding="10,5" Margin="5,0,0,0" IsEnabled="False"/>
+                                </StackPanel>
                                 <ListBox x:Name="RagSourceList" Height="72" Margin="0,6,0,0"
                                          AllowDrop="True" Drop="RagFiles_Drop" PreviewDragOver="RagFiles_DragOver"
                                          ToolTip="Drop .pdf, .md, or .txt files here"/>

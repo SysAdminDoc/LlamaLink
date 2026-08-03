@@ -125,6 +125,13 @@ public sealed class RagIndex
 
     public void Clear() => _chunks.Clear();
 
+    public int RemoveSource(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var fullPath = Path.GetFullPath(path);
+        return _chunks.RemoveAll(chunk => string.Equals(chunk.SourcePath, fullPath, StringComparison.OrdinalIgnoreCase));
+    }
+
     public List<RagSearchResult> Search(string query, int topK = 4)
     {
         if (string.IsNullOrWhiteSpace(query) || topK <= 0 || _chunks.Count == 0)

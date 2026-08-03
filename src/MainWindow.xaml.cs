@@ -37,6 +37,11 @@ public partial class MainWindow : Window
     private RagIndex _ragIndex = new();
     private List<RagSearchResult> _lastRagMatches = new();
     private bool _ragIndexing;
+    private readonly DispatcherTimer _ragSyncTimer;
+    private readonly HashSet<string> _ragPendingPaths = new(StringComparer.OrdinalIgnoreCase);
+    private FileSystemWatcher? _ragWatcher;
+    private string? _ragWatchedFolder;
+    private bool _ragWatchOnStartup;
     private CancellationTokenSource? _serverUpdateCts;
     private LlamaServerRelease? _latestServerRelease;
 
@@ -110,11 +115,20 @@ public partial class MainWindow : Window
         _healthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _healthTimer.Tick += async (_, _) => await CheckServerHealth();
 
+        _ragSyncTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+        _ragSyncTimer.Tick += async (_, _) =>
+        {
+            _ragSyncTimer.Stop();
+            await SyncWatchedRagFolderAsync();
+        };
+
         LoadSettings();
         LoadPromptLibrary();
         RefreshChatHistory();
         RefreshForkMessageOptions();
         RefreshRagSources();
+        if (_ragWatchOnStartup && Directory.Exists(RagFolderBox.Text.Trim()))
+            StartRagFolderWatch(RagFolderBox.Text.Trim());
         UpdateChatContextLabel();
 
         Closing += OnWindowClosing;
@@ -1360,14 +1374,17 @@ public partial class MainWindow : Window
     }
 
     private async void IndexRagFilesAsync(IEnumerable<string> paths)
+        => await IndexRagFilesCoreAsync(SupportedRagPaths(paths), fromWatcher: false);
+
+    private async Task IndexRagFilesCoreAsync(string[] candidates, bool fromWatcher)
     {
         if (_ragIndexing)
             return;
 
-        var candidates = SupportedRagPaths(paths);
         if (candidates.Length == 0)
         {
-            RagStatusLabel.Text = "Choose or drop at least one .pdf, .md, or .txt file.";
+            if (!fromWatcher)
+                RagStatusLabel.Text = "Choose or drop at least one .pdf, .md, or .txt file.";
             return;
         }
 
@@ -1375,7 +1392,9 @@ public partial class MainWindow : Window
         _ragIndexing = true;
         RagAddBtn.IsEnabled = false;
         RagClearBtn.IsEnabled = false;
-        RagStatusLabel.Text = $"Indexing {candidates.Length} document{(candidates.Length == 1 ? "" : "s")}...";
+        RagStatusLabel.Text = fromWatcher
+            ? $"Syncing {candidates.Length} changed document{(candidates.Length == 1 ? "" : "s")}..."
+            : $"Indexing {candidates.Length} document{(candidates.Length == 1 ? "" : "s")}...";
         try
         {
             var result = await Task.Run(() => _ragIndex.IndexFiles(candidates));
@@ -1384,8 +1403,9 @@ public partial class MainWindow : Window
             var errorText = result.Errors.Count == 0
                 ? ""
                 : $" Errors: {string.Join(" | ", result.Errors)}";
+            var watchText = _ragWatcher is null ? "" : $" Watching {Path.GetFileName(_ragWatchedFolder)}.";
             RagStatusLabel.Text = $"Indexed {result.FilesIndexed} file{(result.FilesIndexed == 1 ? "" : "s")} " +
-                $"into {result.ChunksIndexed} chunks.{errorText}";
+                $"into {result.ChunksIndexed} chunks.{watchText}{errorText}";
         }
         catch (Exception ex)
         {
@@ -1397,6 +1417,156 @@ public partial class MainWindow : Window
             RagAddBtn.IsEnabled = true;
             RagClearBtn.IsEnabled = true;
         }
+    }
+
+    private void RagBrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Choose a folder to keep indexed" };
+        if (dialog.ShowDialog() == true)
+            RagFolderBox.Text = dialog.FolderName;
+    }
+
+    private void RagWatch_Click(object sender, RoutedEventArgs e)
+        => StartRagFolderWatch(RagFolderBox.Text.Trim());
+
+    private void RagStopWatch_Click(object sender, RoutedEventArgs e)
+        => StopRagFolderWatch(report: true);
+
+    private void StartRagFolderWatch(string folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            RagStatusLabel.Text = "Choose a folder before starting the watcher.";
+            return;
+        }
+
+        try
+        {
+            folder = Path.GetFullPath(folder);
+            if (!Directory.Exists(folder))
+            {
+                RagStatusLabel.Text = "The selected RAG folder does not exist.";
+                return;
+            }
+
+            StopRagFolderWatch(report: false);
+            _ragWatchedFolder = folder;
+            RagFolderBox.Text = folder;
+            _ragWatcher = new FileSystemWatcher(folder)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                Filter = "*.*",
+                EnableRaisingEvents = true,
+            };
+            _ragWatcher.Created += RagFolder_Changed;
+            _ragWatcher.Changed += RagFolder_Changed;
+            _ragWatcher.Deleted += RagFolder_Deleted;
+            _ragWatcher.Renamed += RagFolder_Renamed;
+            RagWatchBtn.IsEnabled = false;
+            RagStopWatchBtn.IsEnabled = true;
+
+            foreach (var stalePath in _ragIndex.SourcePaths
+                .Where(path => IsPathWithin(path, folder) && !File.Exists(path))
+                .ToList())
+                _ragIndex.RemoveSource(stalePath);
+            RagIndexStore.Save(_ragIndexPath, _ragIndex);
+
+            var initialFiles = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                .Where(RagTextExtractor.IsSupported)
+                .ToArray();
+            IndexRagFilesAsync(initialFiles);
+        }
+        catch (Exception ex)
+        {
+            StopRagFolderWatch(report: false);
+            RagStatusLabel.Text = $"Unable to watch folder: {ex.Message}";
+        }
+    }
+
+    private void StopRagFolderWatch(bool report)
+    {
+        _ragSyncTimer.Stop();
+        _ragPendingPaths.Clear();
+        if (_ragWatcher is not null)
+        {
+            _ragWatcher.EnableRaisingEvents = false;
+            _ragWatcher.Dispose();
+            _ragWatcher = null;
+        }
+        _ragWatchedFolder = null;
+        if (RagWatchBtn is not null)
+            RagWatchBtn.IsEnabled = true;
+        if (RagStopWatchBtn is not null)
+            RagStopWatchBtn.IsEnabled = false;
+        if (report)
+            RagStatusLabel.Text = "Folder watching stopped; the current index is retained.";
+    }
+
+    private void RagFolder_Changed(object sender, FileSystemEventArgs e)
+    {
+        if (!RagTextExtractor.IsSupported(e.FullPath))
+            return;
+
+        try
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                _ragPendingPaths.Add(Path.GetFullPath(e.FullPath));
+                _ragSyncTimer.Stop();
+                _ragSyncTimer.Start();
+                RagStatusLabel.Text = "Folder change detected; sync queued...";
+            });
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    private void RagFolder_Deleted(object sender, FileSystemEventArgs e)
+    {
+        if (!RagTextExtractor.IsSupported(e.FullPath))
+            return;
+
+        try
+        {
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (_ragIndex.RemoveSource(e.FullPath) > 0)
+                {
+                    RagIndexStore.Save(_ragIndexPath, _ragIndex);
+                    RefreshRagSources();
+                    RagStatusLabel.Text = $"Removed deleted source {Path.GetFileName(e.FullPath)}.";
+                }
+            });
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    private void RagFolder_Renamed(object sender, RenamedEventArgs e)
+    {
+        RagFolder_Deleted(sender, e);
+        RagFolder_Changed(sender, e);
+    }
+
+    private async Task SyncWatchedRagFolderAsync()
+    {
+        if (_ragWatcher is null || _ragPendingPaths.Count == 0)
+            return;
+        if (_ragIndexing)
+        {
+            _ragSyncTimer.Start();
+            return;
+        }
+
+        var paths = _ragPendingPaths.ToArray();
+        _ragPendingPaths.Clear();
+        await IndexRagFilesCoreAsync(SupportedRagPaths(paths), fromWatcher: true);
+    }
+
+    private static bool IsPathWithin(string path, string folder)
+    {
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullFolder = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return fullPath.StartsWith(fullFolder, StringComparison.OrdinalIgnoreCase);
     }
 
     private void RagClear_Click(object sender, RoutedEventArgs e)
@@ -2696,6 +2866,8 @@ public partial class MainWindow : Window
             ToolRootBox.Text = GetStr("tool_root", GetDefaultToolRoot());
             RagEnabledCheck.IsChecked = GetBool("rag_enabled", false);
             RagTopKBox.Text = GetInt("rag_top_k", 4).ToString();
+            RagFolderBox.Text = GetStr("rag_folder");
+            _ragWatchOnStartup = GetBool("rag_watch_folder", false);
             var backendTag = GetStr("backend", "openai");
             BackendCombo.SelectedItem = BackendCombo.Items
                 .OfType<ComboBoxItem>()
@@ -2714,6 +2886,7 @@ public partial class MainWindow : Window
         {
             ExePathBox.Text = FindLlamaServer();
             ToolRootBox.Text = GetDefaultToolRoot();
+            _ragWatchOnStartup = false;
             _serverProfiles.Clear();
             RefreshProfileCombo();
         }
@@ -2754,6 +2927,8 @@ public partial class MainWindow : Window
             ["tool_root"] = ToolRootBox.Text,
             ["rag_enabled"] = RagEnabledCheck.IsChecked == true,
             ["rag_top_k"] = int.TryParse(RagTopKBox.Text, out var ragTopK) ? Math.Clamp(ragTopK, 1, 12) : 4,
+            ["rag_folder"] = RagFolderBox.Text,
+            ["rag_watch_folder"] = _ragWatcher is not null,
             ["managed_mode"] = ManagedCheck.IsChecked == true,
             ["selected_model"] = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "",
             ["server_profiles"] = ServerProfileStore.ToJson(_serverProfiles),
@@ -2772,6 +2947,7 @@ public partial class MainWindow : Window
 
         _healthTimer.Stop();
         _streamTimer.Stop();
+        StopRagFolderWatch(report: false);
         _streamCts?.Cancel();
         _downloadCts?.Cancel();
         _serverUpdateCts?.Cancel();
