@@ -24,6 +24,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added an optional `/image <prompt>` stable-diffusion.cpp command adapter with bounded local PNG output.
 - Added selectable JSON, regex, code-only, and custom GBNF output constraints with backend-specific payload hints.
 - Added an opt-in token-probability viewer with streamed top-K alternatives for compatible OpenAI-style backends.
+- Added a prompt inspector with exact request JSON, role transcript, server-template guidance, and approximate token preview.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

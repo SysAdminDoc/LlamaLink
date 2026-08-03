@@ -314,6 +314,36 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Prompt inspector">
+                            <StackPanel>
+                                <TextBlock Text="Preview the exact request body, role transcript, or an approximate tokenization."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,0,0,5"/>
+                                <DockPanel>
+                                    <Button Content="Refresh" Click="InspectPrompt_Click"
+                                            Style="{StaticResource GhostButton}" Padding="9,4" DockPanel.Dock="Right"/>
+                                    <ComboBox x:Name="PromptInspectorViewCombo" SelectionChanged="PromptInspectorView_Changed"
+                                              VerticalContentAlignment="Center">
+                                        <ComboBoxItem Content="Request JSON" Tag="payload" IsSelected="True"/>
+                                        <ComboBoxItem Content="Applied transcript" Tag="transcript"/>
+                                        <ComboBoxItem Content="Token preview" Tag="tokens"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBlock x:Name="PromptInspectorTemplateLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="10" TextWrapping="Wrap" Margin="2,5,0,0"
+                                           Text="The server applies the selected model chat template."/>
+                                <TextBlock x:Name="PromptInspectorTokenLabel" Foreground="{StaticResource PeachBrush}"
+                                           FontSize="10" Margin="2,3,0,0" Text="No prompt inspected yet."/>
+                                <TextBox x:Name="PromptInspectorBox" IsReadOnly="True" AcceptsReturn="True"
+                                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                         HorizontalScrollBarVisibility="Auto" Height="190" Margin="0,5,0,0"
+                                         Padding="6" FontFamily="Consolas" FontSize="10"
+                                         Text="Click Refresh to inspect the current prompt."/>
+                                <TextBlock x:Name="PromptInspectorStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="10" TextWrapping="Wrap" Margin="2,4,0,0"/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <GroupBox Header="Speech (optional local tools)">
                             <StackPanel>
                                 <TextBlock Text="Hold Record to capture a 16 kHz mono WAV, then transcribe with whisper.cpp."

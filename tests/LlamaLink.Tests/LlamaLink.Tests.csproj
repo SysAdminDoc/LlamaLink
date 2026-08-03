@@ -29,6 +29,7 @@
     <Compile Include="..\..\src\ImageGeneration.cs" Link="ImageGeneration.cs" />
     <Compile Include="..\..\src\GrammarTemplates.cs" Link="GrammarTemplates.cs" />
     <Compile Include="..\..\src\TokenProbabilities.cs" Link="TokenProbabilities.cs" />
+    <Compile Include="..\..\src\PromptInspector.cs" Link="PromptInspector.cs" />
   </ItemGroup>
 
 </Project>

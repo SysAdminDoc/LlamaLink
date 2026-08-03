@@ -80,6 +80,7 @@ public partial class MainWindow : Window
     private Thread? _serverThread;
     private readonly List<ServerProfile> _serverProfiles = new();
     private bool _updatingProfiles;
+    private PromptInspection? _lastPromptInspection;
 
     // ── Brushes for chat bubbles ─────────────────────────────────────────
     private static readonly SolidColorBrush UserAccent = new(Color.FromRgb(0x89, 0xB4, 0xFA));
@@ -1742,19 +1743,9 @@ public partial class MainWindow : Window
         RagStatusLabel.Text = "RAG index cleared; source files were not deleted.";
     }
 
-    private List<ChatHistoryMessage> BuildPayloadMessagesWithRag()
+    private List<ChatHistoryMessage> BuildPayloadMessagesWithRag(List<ChatHistoryMessage>? seedMessages = null)
     {
-        var messages = _messages.Select((message, index) =>
-        {
-            var historyMessage = new ChatHistoryMessage
-            {
-                Role = message["role"],
-                Content = message["content"],
-            };
-            if (_messageImages.TryGetValue(index, out var images))
-                historyMessage.Images = VisionImageStore.CloneAll(images).ToList();
-            return historyMessage;
-        }).ToList();
+        var messages = seedMessages ?? BuildChatHistoryMessages();
 
         if (RagEnabledCheck.IsChecked != true || _ragIndex.ChunkCount == 0)
         {
@@ -1793,6 +1784,21 @@ public partial class MainWindow : Window
 
         RagStatusLabel.Text = $"Retrieved {matches.Count} local excerpt{(matches.Count == 1 ? "" : "s")} for this prompt.";
         return messages;
+    }
+
+    private List<ChatHistoryMessage> BuildChatHistoryMessages()
+    {
+        return _messages.Select((message, index) =>
+        {
+            var historyMessage = new ChatHistoryMessage
+            {
+                Role = message["role"],
+                Content = message["content"],
+            };
+            if (_messageImages.TryGetValue(index, out var images))
+                historyMessage.Images = VisionImageStore.CloneAll(images).ToList();
+            return historyMessage;
+        }).ToList();
     }
 
     private void RefreshImageAttachments()
@@ -2956,6 +2962,85 @@ public partial class MainWindow : Window
         TokenProbabilityStatusLabel.Text = _activeTokenProbabilityOptions.Enabled
             ? "Ready to collect token probabilities on the next response."
             : "Token probabilities are disabled.";
+    }
+
+    private void InspectPrompt_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var messages = BuildChatHistoryMessages();
+            if (messages.Count == 0)
+            {
+                var systemPrompt = SystemPromptBox.Text.Trim();
+                if (!string.IsNullOrWhiteSpace(systemPrompt))
+                    messages.Add(new ChatHistoryMessage { Role = "system", Content = systemPrompt });
+            }
+
+            var draft = InputBox.Text.Trim();
+            var images = VisionImageStore.CloneAll(_pendingImages).ToList();
+            if (!string.IsNullOrWhiteSpace(draft) || images.Count > 0)
+            {
+                if (string.IsNullOrWhiteSpace(draft) && images.Count > 0)
+                    draft = "Describe the attached image.";
+                messages.Add(new ChatHistoryMessage { Role = "user", Content = draft, Images = images });
+            }
+
+            var backend = GetSelectedBackend();
+            var model = _serverManaged ? "" : ExtModelBox.Text.Trim();
+            double temp = TempSlider.Value / 100.0;
+            double topP = TopPSlider.Value / 100.0;
+            double repPenalty = RepSlider.Value / 100.0;
+            int.TryParse(TopKBox.Text, out var topK);
+            int.TryParse(MaxTokensBox.Text, out var maxTokens);
+            var payloadMessages = BuildPayloadMessagesWithRag(messages);
+            var payload = BackendAdapter.BuildPayload(
+                backend,
+                model,
+                payloadMessages,
+                temp,
+                topP,
+                topK,
+                repPenalty,
+                maxTokens,
+                tools: GetEnabledToolDefinitions(),
+                grammar: GetGrammarConstraint(),
+                tokenProbabilities: GetTokenProbabilityOptions());
+            var endpoint = BackendAdapter.BuildEndpoint(GetServerUrl(), BackendAdapter.GetChatPath(backend));
+
+            _lastPromptInspection = PromptInspector.Build(backend, endpoint, payloadMessages, payload);
+            RenderPromptInspection();
+            PromptInspectorStatusLabel.Text = $"Inspected {payloadMessages.Count} message(s) for {endpoint}.";
+        }
+        catch (Exception ex)
+        {
+            PromptInspectorStatusLabel.Text = $"Could not inspect prompt: {ex.Message}";
+        }
+    }
+
+    private void PromptInspectorView_Changed(object sender, SelectionChangedEventArgs e)
+        => RenderPromptInspection();
+
+    private void RenderPromptInspection()
+    {
+        if (_lastPromptInspection is null
+            || PromptInspectorBox is null
+            || PromptInspectorTemplateLabel is null
+            || PromptInspectorTokenLabel is null)
+        {
+            return;
+        }
+
+        var view = (PromptInspectorViewCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "payload";
+        PromptInspectorBox.Text = view switch
+        {
+            "transcript" => _lastPromptInspection.Transcript,
+            "tokens" => _lastPromptInspection.TokenPreview,
+            _ => _lastPromptInspection.PayloadJson,
+        };
+        PromptInspectorTemplateLabel.Text =
+            $"{_lastPromptInspection.TemplateDescription} Backend: {_lastPromptInspection.Backend}.";
+        PromptInspectorTokenLabel.Text =
+            $"Approximate prompt size: {_lastPromptInspection.EstimatedTokens} token(s); the exact count depends on the model tokenizer.";
     }
 
     private void GrammarMode_Changed(object sender, SelectionChangedEventArgs e)
