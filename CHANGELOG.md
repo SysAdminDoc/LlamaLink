@@ -8,6 +8,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added focused recommender tests and guarded WPF startup initialization.
 - Added saved server profiles for one-click model and inference-parameter switching.
 - Added detachable chat context metadata so loaded conversations can continue on another profile or endpoint.
+- Added a llama.cpp release updater with hardware-aware Windows x64 asset selection and safe ZIP downloads.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

@@ -15,6 +15,7 @@
     <Compile Include="..\..\src\QuantRecommendation.cs" Link="QuantRecommendation.cs" />
     <Compile Include="..\..\src\ServerProfiles.cs" Link="ServerProfiles.cs" />
     <Compile Include="..\..\src\ChatHistory.cs" Link="ChatHistory.cs" />
+    <Compile Include="..\..\src\LlamaServerUpdater.cs" Link="LlamaServerUpdater.cs" />
   </ItemGroup>
 
 </Project>

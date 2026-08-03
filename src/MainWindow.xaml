@@ -91,6 +91,31 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <!-- ── llama-server updater ── -->
+                        <GroupBox x:Name="ServerUpdateGroup" Header="llama-server updates">
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button x:Name="CheckServerUpdateBtn" Content="Check" DockPanel.Dock="Right"
+                                            Style="{StaticResource GhostButton}" Click="CheckServerUpdates_Click" Padding="8,4"/>
+                                    <TextBlock x:Name="ServerVersionLabel" Text="Local version not checked"
+                                               Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                                <ComboBox x:Name="ServerUpdateAssetCombo" DisplayMemberPath="DisplayName"
+                                          Margin="0,6,0,0" ToolTip="Compatible Windows x64 release asset"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button x:Name="DownloadServerUpdateBtn" Content="Download" Style="{StaticResource GreenButton}"
+                                            Click="DownloadServerUpdate_Click" Padding="10,4" IsEnabled="False"/>
+                                    <Button x:Name="CancelServerUpdateBtn" Content="Cancel" Style="{StaticResource RedButton}"
+                                            Click="CancelServerUpdate_Click" Padding="10,4" Margin="6,0,0,0" Visibility="Collapsed"/>
+                                </DockPanel>
+                                <ProgressBar x:Name="ServerUpdateProgress" Height="5" Margin="0,6,0,0" Visibility="Collapsed"/>
+                                <TextBlock x:Name="ServerUpdateStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Check for a compatible llama.cpp build."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Model ── -->
                         <GroupBox x:Name="ModelGroup" Header="Model">
                             <StackPanel>

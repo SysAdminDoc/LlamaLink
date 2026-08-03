@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _healthTimer;
     private readonly string _settingsPath;
     private readonly string _chatHistoryDir;
+    private CancellationTokenSource? _serverUpdateCts;
+    private LlamaServerRelease? _latestServerRelease;
 
     private Process? _serverProcess;
     private CancellationTokenSource? _streamCts;
@@ -148,6 +150,7 @@ public partial class MainWindow : Window
         ModelGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ServerParamsGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ProfileGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
+        ServerUpdateGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ── Browse dialogs ───────────────────────────────────────────────────
@@ -443,6 +446,192 @@ public partial class MainWindow : Window
     }
 
     // ── Server management ────────────────────────────────────────────────
+    private const string LatestLlamaReleaseUrl =
+        "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
+
+    private async void CheckServerUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        CheckServerUpdateBtn.IsEnabled = false;
+        CheckServerUpdateBtn.Content = "Checking...";
+        DownloadServerUpdateBtn.IsEnabled = false;
+        ServerUpdateStatusLabel.Text = "Checking GitHub for the latest compatible llama.cpp build...";
+        _serverUpdateCts?.Cancel();
+        _serverUpdateCts = new CancellationTokenSource();
+
+        try
+        {
+            var localVersion = await DetectLocalServerVersionAsync(_serverUpdateCts.Token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, LatestLlamaReleaseUrl);
+            request.Headers.UserAgent.ParseAdd("LlamaLink/0.4");
+            request.Headers.Accept.ParseAdd("application/vnd.github+json");
+
+            using var response = await _http.SendAsync(request, _serverUpdateCts.Token);
+            response.EnsureSuccessStatusCode();
+            var release = LlamaServerUpdater.ParseRelease(await response.Content.ReadAsStringAsync(_serverUpdateCts.Token));
+            _latestServerRelease = release;
+
+            var assets = release.Assets
+                .OrderByDescending(asset => asset.Backend)
+                .ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            ServerUpdateAssetCombo.ItemsSource = assets;
+
+            var best = LlamaServerUpdater.SelectBestAsset(assets, LlamaHardwareCapabilities.Detect());
+            ServerUpdateAssetCombo.SelectedItem = best;
+            DownloadServerUpdateBtn.IsEnabled = best is not null;
+            ServerVersionLabel.Text = localVersion is null
+                ? "Local version: not found"
+                : $"Local version: {localVersion}";
+
+            ServerUpdateStatusLabel.Text = best is null
+                ? $"Latest {release.TagName}; no compatible Windows x64 asset was found."
+                : $"Latest {release.TagName}; selected {best.BackendLabel} for this PC.";
+        }
+        catch (OperationCanceledException)
+        {
+            ServerUpdateStatusLabel.Text = "Update check cancelled.";
+        }
+        catch (Exception ex)
+        {
+            ServerUpdateStatusLabel.Text = $"Update check failed: {ex.Message}";
+        }
+        finally
+        {
+            CheckServerUpdateBtn.IsEnabled = true;
+            CheckServerUpdateBtn.Content = "Check";
+            CancelServerUpdateBtn.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private async Task<string?> DetectLocalServerVersionAsync(CancellationToken cancellationToken)
+    {
+        var exe = ExePathBox.Text.Trim();
+        if (string.IsNullOrEmpty(exe) || !File.Exists(exe)) return null;
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = "--version",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            }
+        };
+
+        var started = false;
+        try
+        {
+            process.Start();
+            started = true;
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            await process.WaitForExitAsync(timeout.Token);
+            var output = await Task.WhenAll(stdoutTask, stderrTask);
+            return LlamaServerUpdater.ExtractVersion(string.Join(Environment.NewLine, output));
+        }
+        catch (OperationCanceledException)
+        {
+            if (started && !process.HasExited)
+            {
+                try { process.Kill(true); } catch { }
+            }
+            throw;
+        }
+        catch
+        {
+            if (started && !process.HasExited)
+            {
+                try { process.Kill(true); } catch { }
+            }
+            return null;
+        }
+    }
+
+    private async void DownloadServerUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_latestServerRelease is null || ServerUpdateAssetCombo.SelectedItem is not LlamaServerAsset asset)
+        {
+            ServerUpdateStatusLabel.Text = "Check for updates and select a compatible asset first.";
+            return;
+        }
+
+        var safeTag = Regex.Replace(_latestServerRelease.TagName, @"[^A-Za-z0-9._-]", "_");
+        var destinationFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "Downloads", "LlamaLink", "llama-server", safeTag);
+        var destinationPath = Path.Combine(destinationFolder, Path.GetFileName(asset.Name));
+        var partialPath = destinationPath + ".part";
+
+        try
+        {
+            Directory.CreateDirectory(destinationFolder);
+            if (File.Exists(destinationPath)
+                && (asset.SizeBytes <= 0 || new FileInfo(destinationPath).Length == asset.SizeBytes))
+            {
+                ServerUpdateStatusLabel.Text = $"Already downloaded: {destinationPath}";
+                return;
+            }
+
+            _serverUpdateCts?.Cancel();
+            _serverUpdateCts = new CancellationTokenSource();
+            var token = _serverUpdateCts.Token;
+            CheckServerUpdateBtn.IsEnabled = false;
+            DownloadServerUpdateBtn.IsEnabled = false;
+            CancelServerUpdateBtn.Visibility = Visibility.Visible;
+            ServerUpdateProgress.Visibility = Visibility.Visible;
+            ServerUpdateProgress.Value = 0;
+            ServerUpdateStatusLabel.Text = $"Downloading {asset.Name}...";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, asset.DownloadUrl);
+            request.Headers.UserAgent.ParseAdd("LlamaLink/0.4");
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+            response.EnsureSuccessStatusCode();
+
+            var total = response.Content.Headers.ContentLength ?? asset.SizeBytes;
+            var downloaded = 0L;
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            await using var file = new FileStream(partialPath, FileMode.Create, FileAccess.Write, FileShare.None);
+            var buffer = new byte[1024 * 1024];
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
+            {
+                await file.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+                downloaded += bytesRead;
+                if (total > 0)
+                    ServerUpdateProgress.Value = Math.Min(100, downloaded * 100.0 / total);
+            }
+
+            file.Close();
+            File.Move(partialPath, destinationPath, true);
+            ServerUpdateStatusLabel.Text = $"Downloaded {asset.Name} to {destinationFolder}";
+        }
+        catch (OperationCanceledException)
+        {
+            ServerUpdateStatusLabel.Text = "Download cancelled; partial file kept for retry.";
+        }
+        catch (Exception ex)
+        {
+            ServerUpdateStatusLabel.Text = $"Download failed: {ex.Message}";
+        }
+        finally
+        {
+            CheckServerUpdateBtn.IsEnabled = true;
+            DownloadServerUpdateBtn.IsEnabled = ServerUpdateAssetCombo.SelectedItem is LlamaServerAsset;
+            CancelServerUpdateBtn.Visibility = Visibility.Collapsed;
+            ServerUpdateProgress.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void CancelServerUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        _serverUpdateCts?.Cancel();
+    }
+
     private string GetServerUrl()
     {
         if (_serverManaged)
