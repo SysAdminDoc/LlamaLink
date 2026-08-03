@@ -5,6 +5,7 @@ A simple, versatile chat interface for local LLMs via llama-server.
 """
 
 import sys, os, subprocess, json, re, time, hashlib
+from multiprocessing import freeze_support
 from pathlib import Path
 
 
@@ -1987,4 +1988,5 @@ def main():
 
 
 if __name__ == "__main__":
+    freeze_support()
     main()

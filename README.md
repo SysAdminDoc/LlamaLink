@@ -102,7 +102,9 @@ pip install pyinstaller
 pyinstaller llamalink.spec
 ```
 
-The executable will be in `dist/LlamaLink.exe`.
+The spec produces a one-file `dist/LlamaLink.exe`, wires the Qt runtime hook,
+calls `freeze_support()`, and embeds the application icon. The current C#/.NET
+release is built separately with `dotnet publish` as described above.
 
 ## License
 

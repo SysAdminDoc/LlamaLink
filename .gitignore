@@ -1,6 +1,8 @@
 bin/
 obj/
 dist/
+build-python/
+dist-python/
 *.user
 .vs/
 __pycache__/
