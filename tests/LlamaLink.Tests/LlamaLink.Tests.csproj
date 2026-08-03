@@ -27,6 +27,7 @@
     <Compile Include="..\..\src\VisionSupport.cs" Link="VisionSupport.cs" />
     <Compile Include="..\..\src\SpeechIntegration.cs" Link="SpeechIntegration.cs" />
     <Compile Include="..\..\src\ImageGeneration.cs" Link="ImageGeneration.cs" />
+    <Compile Include="..\..\src\GrammarTemplates.cs" Link="GrammarTemplates.cs" />
   </ItemGroup>
 
 </Project>

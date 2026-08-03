@@ -2054,7 +2054,8 @@ public partial class MainWindow : Window
         var payloadMessages = BuildPayloadMessagesWithRag();
         var toolDefinitions = GetEnabledToolDefinitions();
         var payload = BackendAdapter.BuildPayload(
-            backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens, toolDefinitions);
+            backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens,
+            tools: toolDefinitions, grammar: GetGrammarConstraint());
 
         _streaming = true;
         RefreshForkMessageOptions();
@@ -2897,6 +2898,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private GrammarConstraint GetGrammarConstraint()
+    {
+        var modeTag = (GrammarModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "None";
+        return new GrammarConstraint(GrammarTemplates.ParseMode(modeTag), GrammarEditorBox.Text.Trim());
+    }
+
+    private void GrammarMode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (GrammarEditorBox is null || GrammarStatusLabel is null) return;
+
+        var mode = GrammarTemplates.ParseMode(
+            (GrammarModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString());
+        if (mode != GrammarMode.Custom)
+            GrammarEditorBox.Text = GrammarTemplates.GetTemplate(mode);
+        GrammarStatusLabel.Text = GrammarTemplates.GetDescription(mode);
+    }
+
+    private void LoadGrammarTemplate_Click(object sender, RoutedEventArgs e)
+        => GrammarMode_Changed(sender, null!);
+
     // ── HuggingFace model search & download ──────────────────────────────
     private void HfSearch_Click(object sender, RoutedEventArgs e) => HfSearch();
     private void HfSearchBox_KeyDown(object sender, KeyEventArgs e)
@@ -3224,6 +3245,16 @@ public partial class MainWindow : Window
             TopKBox.Text = GetInt("top_k", 40).ToString();
             RepSlider.Value = GetInt("repeat_penalty", 110);
             MaxTokensBox.Text = GetInt("max_tokens", 2048).ToString();
+            var grammarMode = GrammarTemplates.ParseMode(GetStr("grammar_mode", "None"));
+            GrammarModeCombo.SelectedItem = GrammarModeCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => GrammarTemplates.ParseMode(item.Tag?.ToString()) == grammarMode)
+                ?? GrammarModeCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
+            var savedGrammar = GetStr("grammar_editor");
+            GrammarEditorBox.Text = string.IsNullOrWhiteSpace(savedGrammar)
+                ? GrammarTemplates.GetTemplate(grammarMode)
+                : savedGrammar;
+            GrammarStatusLabel.Text = GrammarTemplates.GetDescription(grammarMode);
             SystemPromptBox.Text = GetStr("system_prompt");
             FlashAttnCheck.IsChecked = GetBool("flash_attn", true);
             MlockCheck.IsChecked = GetBool("mlock", false);
@@ -3305,6 +3336,8 @@ public partial class MainWindow : Window
             ["top_k"] = int.TryParse(TopKBox.Text, out var k) ? k : 40,
             ["repeat_penalty"] = (int)RepSlider.Value,
             ["max_tokens"] = int.TryParse(MaxTokensBox.Text, out var m) ? m : 2048,
+            ["grammar_mode"] = (GrammarModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "None",
+            ["grammar_editor"] = GrammarEditorBox.Text,
             ["system_prompt"] = SystemPromptBox.Text,
             ["flash_attn"] = FlashAttnCheck.IsChecked == true,
             ["mlock"] = MlockCheck.IsChecked == true,

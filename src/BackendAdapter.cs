@@ -82,7 +82,8 @@ public static class BackendAdapter
         int topK,
         double repeatPenalty,
         int maxTokens,
-        IReadOnlyList<SafeToolDefinition>? tools = null)
+        IReadOnlyList<SafeToolDefinition>? tools = null,
+        GrammarConstraint? grammar = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
@@ -108,6 +109,9 @@ public static class BackendAdapter
             };
             if (tools is { Count: > 0 })
                 ollamaPayload["tools"] = tools.Select(tool => tool.ToPayload()).ToArray();
+            if (grammar is { Enabled: true, Mode: GrammarMode.Json })
+                ollamaPayload["format"] = "json";
+            ApplyGrammarConstraint(ollamaPayload, grammar);
             return ollamaPayload;
         }
 
@@ -124,7 +128,22 @@ public static class BackendAdapter
         if (maxTokens > 0) payload["max_tokens"] = maxTokens;
         if (tools is { Count: > 0 })
             payload["tools"] = tools.Select(tool => tool.ToPayload()).ToArray();
+        ApplyGrammarConstraint(payload, grammar);
         return payload;
+    }
+
+    private static void ApplyGrammarConstraint(Dictionary<string, object> payload, GrammarConstraint? grammar)
+    {
+        if (grammar is not { Enabled: true }) return;
+
+        payload["grammar"] = grammar.Gbnf;
+        if (grammar.Mode == GrammarMode.Json)
+        {
+            payload["response_format"] = new Dictionary<string, object>
+            {
+                ["type"] = "json_object",
+            };
+        }
     }
 
     private static Dictionary<string, object> BuildMessagePayload(

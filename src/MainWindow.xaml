@@ -271,6 +271,25 @@
                                         </ComboBox>
                                     </StackPanel>
                                 </Grid>
+                                <DockPanel Margin="0,8,0,0">
+                                    <Button Content="Load template" Click="LoadGrammarTemplate_Click"
+                                            Style="{StaticResource GhostButton}" Padding="8,4" DockPanel.Dock="Right"/>
+                                    <Label Content="Output" Width="50" FontSize="11"/>
+                                    <ComboBox x:Name="GrammarModeCombo" SelectionChanged="GrammarMode_Changed"
+                                              VerticalContentAlignment="Center">
+                                        <ComboBoxItem Content="Unconstrained" Tag="None" IsSelected="True"/>
+                                        <ComboBoxItem Content="JSON" Tag="Json"/>
+                                        <ComboBoxItem Content="Regex starter" Tag="Regex"/>
+                                        <ComboBoxItem Content="Code only" Tag="CodeOnly"/>
+                                        <ComboBoxItem Content="Custom GBNF" Tag="Custom"/>
+                                    </ComboBox>
+                                </DockPanel>
+                                <TextBox x:Name="GrammarEditorBox" Height="74" Margin="0,5,0,0"
+                                         AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                         FontFamily="Consolas" FontSize="10" ToolTip="llama.cpp GBNF grammar"/>
+                                <TextBlock x:Name="GrammarStatusLabel" Text="No output constraint is sent."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="10"
+                                           TextWrapping="Wrap" Margin="0,4,0,0"/>
                             </StackPanel>
                         </GroupBox>
 
