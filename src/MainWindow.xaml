@@ -174,6 +174,75 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="LoRA fine-tune kickoff">
+                            <StackPanel>
+                                <TextBlock Text="Run llama.cpp's finetune example against the selected base model and a local training file."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                           TextWrapping="Wrap"/>
+                                <DockPanel Margin="0,6,0,0">
+                                    <Button Content="..." DockPanel.Dock="Right" Click="BrowseFineTuneExe_Click"
+                                            Padding="8,4" Margin="6,0,0,0" ToolTip="Select finetune.exe"/>
+                                    <TextBox x:Name="FineTuneExeBox" VerticalContentAlignment="Center"
+                                             ToolTip="Path to llama.cpp's finetune executable"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Button Content="..." DockPanel.Dock="Right" Click="BrowseFineTuneData_Click"
+                                            Padding="8,4" Margin="6,0,0,0" ToolTip="Select training text or JSONL"/>
+                                    <TextBox x:Name="FineTuneDataBox" VerticalContentAlignment="Center"
+                                             ToolTip="Local training data file"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Button Content="..." DockPanel.Dock="Right" Click="BrowseFineTuneOutput_Click"
+                                            Padding="8,4" Margin="6,0,0,0" ToolTip="Choose adapter output path"/>
+                                    <TextBox x:Name="FineTuneOutputBox" VerticalContentAlignment="Center"
+                                             ToolTip="Output LoRA adapter path"/>
+                                </DockPanel>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <Label Content="Context" FontSize="11"/>
+                                        <TextBox x:Name="FineTuneContextBox" Text="512" Margin="0,2,3,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <Label Content="Batch" FontSize="11"/>
+                                        <TextBox x:Name="FineTuneBatchBox" Text="1" Margin="3,2"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <Label Content="Microbatch" FontSize="11"/>
+                                        <TextBox x:Name="FineTuneMicroBatchBox" Text="1" Margin="3,2"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3">
+                                        <Label Content="Adam iters" FontSize="11"/>
+                                        <TextBox x:Name="FineTuneIterationsBox" Text="16" Margin="3,2,0,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                                <DockPanel Margin="0,5,0,0">
+                                    <Label Content="Threads" Width="56"/>
+                                    <TextBox x:Name="FineTuneThreadsBox" Text="4" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button x:Name="FineTuneStartBtn" Content="Start fine-tune"
+                                            Click="StartFineTune_Click" Style="{StaticResource GreenButton}"
+                                            Padding="9,4"/>
+                                    <Button x:Name="FineTuneCancelBtn" Content="Cancel"
+                                            Click="CancelFineTune_Click" Style="{StaticResource RedButton}"
+                                            Padding="9,4" Margin="6,0,0,0" Visibility="Collapsed"/>
+                                </StackPanel>
+                                <TextBlock x:Name="FineTuneStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Configure finetune.exe, training data, and an adapter output path."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Auto-quant recommendation ── -->
                         <GroupBox Header="Auto-quant recommendation">
                             <Grid>

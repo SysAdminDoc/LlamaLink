@@ -53,6 +53,7 @@ public partial class MainWindow : Window
     private string? _speechAudioPath;
     private CancellationTokenSource? _speechCts;
     private CancellationTokenSource? _imageGenCts;
+    private CancellationTokenSource? _fineTuneCts;
     private CancellationTokenSource? _streamCts;
     private CancellationTokenSource? _downloadCts;
     private bool _streaming;
@@ -519,6 +520,43 @@ public partial class MainWindow : Window
             DraftModelBox.Text = dlg.FileName;
     }
 
+    private void BrowseFineTuneExe_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select llama.cpp finetune executable",
+            Filter = "Executables (*.exe)|*.exe|All Files (*.*)|*.*",
+            FileName = FineTuneExeBox.Text,
+        };
+        if (dlg.ShowDialog() == true)
+            FineTuneExeBox.Text = dlg.FileName;
+    }
+
+    private void BrowseFineTuneData_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select fine-tune training data",
+            Filter = "Training data (*.txt;*.jsonl;*.json)|*.txt;*.jsonl;*.json|All Files (*.*)|*.*",
+            FileName = FineTuneDataBox.Text,
+        };
+        if (dlg.ShowDialog() == true)
+            FineTuneDataBox.Text = dlg.FileName;
+    }
+
+    private void BrowseFineTuneOutput_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new SaveFileDialog
+        {
+            Title = "Choose LoRA adapter output",
+            Filter = "LoRA adapter (*.bin;*.gguf)|*.bin;*.gguf|All Files (*.*)|*.*",
+            FileName = FineTuneOutputBox.Text,
+            AddExtension = false,
+        };
+        if (dlg.ShowDialog() == true)
+            FineTuneOutputBox.Text = dlg.FileName;
+    }
+
     // ── Model scanning ───────────────────────────────────────────────────
     private void ModelFolder_Changed(object sender, TextChangedEventArgs e)
     {
@@ -706,6 +744,79 @@ public partial class MainWindow : Window
             return $"{bytes / 1024.0:F0} KB";
         return $"{bytes:N0} B";
     }
+
+    private async void StartFineTune_Click(object sender, RoutedEventArgs e)
+    {
+        if (_fineTuneCts is not null)
+            return;
+        if (_serverManaged && _serverProcess is { HasExited: false })
+        {
+            FineTuneStatusLabel.Text = "Stop the managed llama-server before starting fine-tuning.";
+            return;
+        }
+
+        var baseModelPath = (ModelCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
+        var settings = new FineTuneSettings(
+            FineTuneExeBox.Text.Trim(),
+            baseModelPath,
+            FineTuneDataBox.Text.Trim(),
+            FineTuneOutputBox.Text.Trim(),
+            ParseFineTuneInt(FineTuneContextBox.Text, 512),
+            ParseFineTuneInt(FineTuneBatchBox.Text, 1),
+            ParseFineTuneInt(FineTuneMicroBatchBox.Text, 1),
+            ParseFineTuneInt(FineTuneIterationsBox.Text, 16),
+            ParseFineTuneInt(FineTuneThreadsBox.Text, 4));
+        if (File.Exists(settings.OutputAdapterPath))
+        {
+            var overwrite = MessageBox.Show(
+                this,
+                $"Overwrite the existing adapter?{Environment.NewLine}{Environment.NewLine}{settings.OutputAdapterPath}",
+                "Confirm adapter overwrite",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (overwrite != MessageBoxResult.Yes)
+                return;
+        }
+
+        _fineTuneCts = new CancellationTokenSource();
+        FineTuneStartBtn.IsEnabled = false;
+        FineTuneCancelBtn.Visibility = Visibility.Visible;
+        FineTuneStatusLabel.Text = "Starting fine-tune...";
+        try
+        {
+            var progress = new Progress<string>(line =>
+                FineTuneStatusLabel.Text = line.Length > 240 ? line[..240] : line);
+            var result = await FineTuneRunner.RunAsync(settings, progress, _fineTuneCts.Token);
+            FineTuneStatusLabel.Text = result.Message;
+            StatusLabel.Text = result.Success ? "LoRA fine-tune completed." : "LoRA fine-tune failed.";
+        }
+        catch (OperationCanceledException)
+        {
+            FineTuneStatusLabel.Text = "Fine-tune cancelled.";
+            StatusLabel.Text = "LoRA fine-tune cancelled.";
+        }
+        catch (Exception ex)
+        {
+            FineTuneStatusLabel.Text = $"Fine-tune failed: {ex.Message}";
+            StatusLabel.Text = "LoRA fine-tune failed.";
+        }
+        finally
+        {
+            _fineTuneCts?.Dispose();
+            _fineTuneCts = null;
+            FineTuneStartBtn.IsEnabled = true;
+            FineTuneCancelBtn.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void CancelFineTune_Click(object sender, RoutedEventArgs e)
+    {
+        _fineTuneCts?.Cancel();
+    }
+
+    private static int ParseFineTuneInt(string value, int fallback)
+        => int.TryParse(value, out var parsed) ? parsed : fallback;
 
     private void ProfileCombo_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -3751,6 +3862,14 @@ public partial class MainWindow : Window
             CostRateBox.Text = GetDouble("cost_rate", 0.18).ToString("0.####", CultureInfo.InvariantCulture);
             CostForecastTokensBox.Text = GetInt("cost_forecast_tokens", 2048).ToString();
             CostForecastTpsBox.Text = GetDouble("cost_forecast_tps", 20).ToString("0.##", CultureInfo.InvariantCulture);
+            FineTuneExeBox.Text = GetStr("finetune_exe");
+            FineTuneDataBox.Text = GetStr("finetune_data");
+            FineTuneOutputBox.Text = GetStr("finetune_output");
+            FineTuneContextBox.Text = GetInt("finetune_context", 512).ToString();
+            FineTuneBatchBox.Text = GetInt("finetune_batch", 1).ToString();
+            FineTuneMicroBatchBox.Text = GetInt("finetune_microbatch", 1).ToString();
+            FineTuneIterationsBox.Text = GetInt("finetune_iterations", 16).ToString();
+            FineTuneThreadsBox.Text = GetInt("finetune_threads", 4).ToString();
             SpeculativeCheck.IsChecked = GetBool("speculative_enabled", false);
             DraftModelBox.Text = GetStr("speculative_draft_model");
             DraftGpuLayersBox.Text = GetInt("speculative_draft_gpu_layers", 99).ToString();
@@ -3854,6 +3973,14 @@ public partial class MainWindow : Window
                 ? Math.Clamp(costTokens, 1, 1_000_000)
                 : 2048,
             ["cost_forecast_tps"] = TryParseCapacity(CostForecastTpsBox.Text, out var costTps) ? Math.Max(0.01, costTps) : 20,
+            ["finetune_exe"] = FineTuneExeBox.Text,
+            ["finetune_data"] = FineTuneDataBox.Text,
+            ["finetune_output"] = FineTuneOutputBox.Text,
+            ["finetune_context"] = ParseFineTuneInt(FineTuneContextBox.Text, 512),
+            ["finetune_batch"] = ParseFineTuneInt(FineTuneBatchBox.Text, 1),
+            ["finetune_microbatch"] = ParseFineTuneInt(FineTuneMicroBatchBox.Text, 1),
+            ["finetune_iterations"] = ParseFineTuneInt(FineTuneIterationsBox.Text, 16),
+            ["finetune_threads"] = ParseFineTuneInt(FineTuneThreadsBox.Text, 4),
             ["speculative_enabled"] = SpeculativeCheck.IsChecked == true,
             ["speculative_draft_model"] = DraftModelBox.Text,
             ["speculative_draft_gpu_layers"] = int.TryParse(DraftGpuLayersBox.Text, out var draftGpuLayers)
@@ -3920,6 +4047,7 @@ public partial class MainWindow : Window
         StopRagFolderWatch(report: false);
         _speechCts?.Cancel();
         _imageGenCts?.Cancel();
+        _fineTuneCts?.Cancel();
         if (_speechRecorder is not null && !_speechRecorder.HasExited)
         {
             try { _speechRecorder.Kill(true); } catch { }

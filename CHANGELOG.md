@@ -33,6 +33,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added a validated visual GBNF rule builder that round-trips with the custom grammar editor.
 - Added measured and forecast token-energy estimates using configurable power draw and electricity rate.
 - Added a confirmation-gated model pruning tool that protects active and saved model references.
+- Added a cancellable LoRA fine-tune kickoff for the local llama.cpp finetune executable.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
