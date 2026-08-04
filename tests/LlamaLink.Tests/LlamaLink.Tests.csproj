@@ -32,6 +32,7 @@
     <Compile Include="..\..\src\PromptInspector.cs" Link="PromptInspector.cs" />
     <Compile Include="..\..\src\ModelCard.cs" Link="ModelCard.cs" />
     <Compile Include="..\..\src\SpeculativeDecoding.cs" Link="SpeculativeDecoding.cs" />
+    <Compile Include="..\..\src\GrammarBuilder.cs" Link="GrammarBuilder.cs" />
   </ItemGroup>
 
 </Project>

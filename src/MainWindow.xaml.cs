@@ -82,6 +82,7 @@ public partial class MainWindow : Window
     private readonly List<ServerProfile> _serverProfiles = new();
     private bool _updatingProfiles;
     private PromptInspection? _lastPromptInspection;
+    private readonly ObservableCollection<GrammarBuilderRule> _grammarBuilderRules = new();
 
     // ── Brushes for chat bubbles ─────────────────────────────────────────
     private static readonly SolidColorBrush UserAccent = new(Color.FromRgb(0x89, 0xB4, 0xFA));
@@ -95,6 +96,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         TokenProbabilityList.ItemsSource = _tokenProbabilityRows;
+        GrammarRuleList.ItemsSource = _grammarBuilderRules;
 
         _settingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -3098,6 +3100,78 @@ public partial class MainWindow : Window
 
     private void LoadGrammarTemplate_Click(object sender, RoutedEventArgs e)
         => GrammarMode_Changed(sender, null!);
+
+    private void GrammarRule_Selected(object sender, SelectionChangedEventArgs e)
+    {
+        if (GrammarRuleList.SelectedItem is not GrammarBuilderRule rule) return;
+        GrammarRuleNameBox.Text = rule.Name;
+        GrammarRuleDefinitionBox.Text = rule.Definition;
+    }
+
+    private void AddGrammarRule_Click(object sender, RoutedEventArgs e)
+    {
+        var name = GrammarRuleNameBox.Text.Trim();
+        var definition = GrammarRuleDefinitionBox.Text.Trim();
+        if (!GrammarBuilder.IsValidName(name) || string.IsNullOrWhiteSpace(definition))
+        {
+            GrammarBuilderStatusLabel.Text = "Use a valid rule name and a non-empty GBNF definition.";
+            return;
+        }
+
+        var replacement = new GrammarBuilderRule(name, definition);
+        var existingIndex = -1;
+        for (var index = 0; index < _grammarBuilderRules.Count; index++)
+        {
+            if (string.Equals(_grammarBuilderRules[index].Name, name, StringComparison.Ordinal))
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+        if (existingIndex >= 0 && existingIndex < _grammarBuilderRules.Count)
+            _grammarBuilderRules[existingIndex] = replacement;
+        else
+            _grammarBuilderRules.Add(replacement);
+        GrammarRuleList.SelectedItem = replacement;
+        GrammarBuilderStatusLabel.Text = $"Editing {_grammarBuilderRules.Count} rule(s). Apply them to the GBNF editor when ready.";
+    }
+
+    private void RemoveGrammarRule_Click(object sender, RoutedEventArgs e)
+    {
+        if (GrammarRuleList.SelectedItem is not GrammarBuilderRule rule) return;
+        _grammarBuilderRules.Remove(rule);
+        GrammarBuilderStatusLabel.Text = $"Removed {rule.Name}; {_grammarBuilderRules.Count} rule(s) remain.";
+    }
+
+    private void LoadGrammarRules_Click(object sender, RoutedEventArgs e)
+    {
+        _grammarBuilderRules.Clear();
+        foreach (var rule in GrammarBuilder.Parse(GrammarEditorBox.Text))
+            _grammarBuilderRules.Add(rule);
+        GrammarBuilderStatusLabel.Text = _grammarBuilderRules.Count == 0
+            ? "No valid rules found in the editor."
+            : $"Loaded {_grammarBuilderRules.Count} rule(s) from the editor.";
+    }
+
+    private void ApplyGrammarRules_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var gbnf = GrammarBuilder.Build(_grammarBuilderRules);
+            var custom = GrammarModeCombo.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(item.Tag?.ToString(), "Custom", StringComparison.Ordinal));
+            if (custom is not null)
+                GrammarModeCombo.SelectedItem = custom;
+            GrammarEditorBox.Text = gbnf;
+            GrammarStatusLabel.Text = GrammarTemplates.GetDescription(GrammarMode.Custom);
+            GrammarBuilderStatusLabel.Text = $"Applied {_grammarBuilderRules.Count} validated rule(s) to the editor.";
+        }
+        catch (ArgumentException ex)
+        {
+            GrammarBuilderStatusLabel.Text = ex.Message;
+        }
+    }
 
     // ── HuggingFace model search & download ──────────────────────────────
     private void HfSearch_Click(object sender, RoutedEventArgs e) => HfSearch();

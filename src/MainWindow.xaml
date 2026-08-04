@@ -319,6 +319,33 @@
                                 <TextBox x:Name="GrammarEditorBox" Height="74" Margin="0,5,0,0"
                                          AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                                          FontFamily="Consolas" FontSize="10" ToolTip="llama.cpp GBNF grammar"/>
+                                <Expander Header="Visual rule builder" Margin="0,6,0,0">
+                                    <StackPanel Margin="0,5,0,0">
+                                        <DockPanel>
+                                            <Label Content="Name" Width="44" FontSize="11"/>
+                                            <TextBox x:Name="GrammarRuleNameBox" Text="root" VerticalContentAlignment="Center"/>
+                                        </DockPanel>
+                                        <TextBox x:Name="GrammarRuleDefinitionBox" AcceptsReturn="True"
+                                                 TextWrapping="Wrap" Height="42" Margin="0,4,0,0"
+                                                 VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="10"
+                                                 ToolTip="GBNF right-hand side, for example: value"/>
+                                        <ListBox x:Name="GrammarRuleList" Height="76" Margin="0,5,0,0"
+                                                 DisplayMemberPath="Display" SelectionChanged="GrammarRule_Selected"/>
+                                        <WrapPanel Margin="0,5,0,0">
+                                            <Button Content="Add / update" Click="AddGrammarRule_Click"
+                                                    Style="{StaticResource GhostButton}" Padding="8,4"/>
+                                            <Button Content="Remove" Click="RemoveGrammarRule_Click"
+                                                    Style="{StaticResource GhostButton}" Padding="8,4" Margin="4,0,0,0"/>
+                                            <Button Content="Load from GBNF" Click="LoadGrammarRules_Click"
+                                                    Style="{StaticResource GhostButton}" Padding="8,4" Margin="4,0,0,0"/>
+                                            <Button Content="Apply to editor" Click="ApplyGrammarRules_Click"
+                                                    Style="{StaticResource GreenButton}" Padding="8,4" Margin="4,0,0,0"/>
+                                        </WrapPanel>
+                                        <TextBlock x:Name="GrammarBuilderStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                                   FontSize="10" TextWrapping="Wrap" Margin="2,4,0,0"
+                                                   Text="Load the editor text to start building named rules."/>
+                                    </StackPanel>
+                                </Expander>
                                 <TextBlock x:Name="GrammarStatusLabel" Text="No output constraint is sent."
                                            Foreground="{StaticResource Overlay0Brush}" FontSize="10"
                                            TextWrapping="Wrap" Margin="0,4,0,0"/>
