@@ -436,6 +436,7 @@ public partial class MainWindow : Window
         ConnectBtn.Visibility = managed ? Visibility.Collapsed : Visibility.Visible;
         ModelGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ServerParamsGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
+        SpeculativeGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ProfileGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
         ServerUpdateGroup.Visibility = managed ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -472,6 +473,18 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog() == true)
             ModelFolderBox.Text = dlg.FolderName;
+    }
+
+    private void BrowseDraftModel_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "Select draft GGUF model",
+            Filter = "GGUF models (*.gguf)|*.gguf|All files (*.*)|*.*",
+            InitialDirectory = ModelFolderBox.Text,
+        };
+        if (dlg.ShowDialog() == true)
+            DraftModelBox.Text = dlg.FileName;
     }
 
     // ── Model scanning ───────────────────────────────────────────────────
@@ -1003,6 +1016,19 @@ public partial class MainWindow : Window
         if (FlashAttnCheck.IsChecked == true) args.Add("-fa");
         if (MlockCheck.IsChecked == true) args.Add("--mlock");
 
+        var speculative = GetSpeculativeDecodingSettings();
+        if (speculative.Enabled)
+        {
+            if (!File.Exists(speculative.DraftModelPath))
+            {
+                StatusLabel.Text = "ERROR: Select an existing draft GGUF model";
+                SpeculativeStatusLabel.Text = "Draft model path does not exist.";
+                return;
+            }
+            args.AddRange(SpeculativeDecodingArguments.Build(speculative));
+            SpeculativeStatusLabel.Text = "Draft model will propose tokens for the main model.";
+        }
+
         ServerLogBox.Clear();
         _serverManaged = true;
         StartBtn.IsEnabled = false;
@@ -1089,6 +1115,21 @@ public partial class MainWindow : Window
     {
         ServerLogBox.AppendText(text + "\n");
         ServerLogBox.ScrollToEnd();
+    }
+
+    private SpeculativeDecodingSettings GetSpeculativeDecodingSettings()
+    {
+        var draftGpuLayers = int.TryParse(DraftGpuLayersBox.Text, out var parsedGpuLayers)
+            ? Math.Max(-1, parsedGpuLayers)
+            : -1;
+        var draftContext = int.TryParse(DraftContextBox.Text, out var parsedContext)
+            ? Math.Max(0, parsedContext)
+            : 0;
+        return new SpeculativeDecodingSettings(
+            SpeculativeCheck.IsChecked == true,
+            DraftModelBox.Text.Trim(),
+            draftGpuLayers,
+            draftContext);
     }
 
     private async void ConnectExternal_Click(object sender, RoutedEventArgs e)
@@ -3434,6 +3475,10 @@ public partial class MainWindow : Window
             TopKBox.Text = GetInt("top_k", 40).ToString();
             RepSlider.Value = GetInt("repeat_penalty", 110);
             MaxTokensBox.Text = GetInt("max_tokens", 2048).ToString();
+            SpeculativeCheck.IsChecked = GetBool("speculative_enabled", false);
+            DraftModelBox.Text = GetStr("speculative_draft_model");
+            DraftGpuLayersBox.Text = GetInt("speculative_draft_gpu_layers", 99).ToString();
+            DraftContextBox.Text = GetInt("speculative_draft_context", 512).ToString();
             TokenProbabilitiesCheck.IsChecked = GetBool("token_probabilities_enabled", false);
             TokenProbabilitiesKBox.Text = GetInt("token_probabilities_top_k", 5).ToString();
             var grammarMode = GrammarTemplates.ParseMode(GetStr("grammar_mode", "None"));
@@ -3527,6 +3572,14 @@ public partial class MainWindow : Window
             ["top_k"] = int.TryParse(TopKBox.Text, out var k) ? k : 40,
             ["repeat_penalty"] = (int)RepSlider.Value,
             ["max_tokens"] = int.TryParse(MaxTokensBox.Text, out var m) ? m : 2048,
+            ["speculative_enabled"] = SpeculativeCheck.IsChecked == true,
+            ["speculative_draft_model"] = DraftModelBox.Text,
+            ["speculative_draft_gpu_layers"] = int.TryParse(DraftGpuLayersBox.Text, out var draftGpuLayers)
+                ? Math.Max(-1, draftGpuLayers)
+                : 99,
+            ["speculative_draft_context"] = int.TryParse(DraftContextBox.Text, out var draftContext)
+                ? Math.Max(0, draftContext)
+                : 512,
             ["token_probabilities_enabled"] = TokenProbabilitiesCheck.IsChecked == true,
             ["token_probabilities_top_k"] = int.TryParse(TokenProbabilitiesKBox.Text, out var probabilityTopK)
                 ? Math.Clamp(probabilityTopK, 1, 20)

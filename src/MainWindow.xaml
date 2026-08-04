@@ -196,6 +196,38 @@
                             </Grid>
                         </GroupBox>
 
+                        <GroupBox x:Name="SpeculativeGroup" Header="Speculative decoding">
+                            <StackPanel>
+                                <CheckBox x:Name="SpeculativeCheck" Content="Use a draft model"
+                                          Margin="0,0,0,5"/>
+                                <DockPanel>
+                                    <Button Content="..." DockPanel.Dock="Right" Click="BrowseDraftModel_Click"
+                                            Padding="10,5" Margin="6,0,0,0" ToolTip="Choose a draft GGUF model"/>
+                                    <TextBox x:Name="DraftModelBox" VerticalContentAlignment="Center"
+                                             ToolTip="llama.cpp -md/--model-draft path"/>
+                                </DockPanel>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <Label Content="Draft GPU layers" FontSize="11"/>
+                                        <TextBox x:Name="DraftGpuLayersBox" Text="99" Margin="0,2,4,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <Label Content="Draft context" FontSize="11"/>
+                                        <TextBox x:Name="DraftContextBox" Text="512" Margin="4,2,0,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="SpeculativeStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Optional: the draft model proposes tokens for the main model to verify."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Server profiles ── -->
                         <GroupBox x:Name="ProfileGroup" Header="Server profiles">
                             <StackPanel>
