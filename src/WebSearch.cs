@@ -100,7 +100,7 @@ public static class WebSearchService
     private static HttpClient CreateClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaLink/0.4 local-web-search");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("LlamaLink/0.5 local-web-search");
         return client;
     }
 

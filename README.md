@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.5.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?style=flat-square&logo=windows" alt="Platform">
   <img src="https://img.shields.io/badge/python-3.8+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/theme-Catppuccin%20Mocha-b4befe?style=flat-square" alt="Theme">
@@ -27,6 +27,7 @@
 - View available quantizations (Q4_K_M, Q8_0, IQ3_S, etc.) with file sizes
 - Download with progress bar, speed display, ETA, and resume support
 - Recursive model folder scanning with automatic detection
+- Confirmation-gated model pruning with protection for active and saved model references
 
 **Server Control**
 - Launch and manage llama-server with full parameter control
@@ -42,6 +43,8 @@
 - System prompt support
 - Parameter presets: Default, Creative, Precise, Code, Roleplay
 - Adjustable temperature, top_p, top_k, repeat penalty, max tokens
+- Prompt inspection, grammar controls, token probabilities, and configurable energy estimates
+- Local LoRA fine-tune kickoff through llama.cpp's finetune example
 
 **Chat History**
 - Auto-saves conversations locally

@@ -1035,7 +1035,7 @@ public partial class MainWindow : Window
         {
             var localVersion = await DetectLocalServerVersionAsync(_serverUpdateCts.Token);
             using var request = new HttpRequestMessage(HttpMethod.Get, LatestLlamaReleaseUrl);
-            request.Headers.UserAgent.ParseAdd("LlamaLink/0.4");
+            request.Headers.UserAgent.ParseAdd("LlamaLink/0.5");
             request.Headers.Accept.ParseAdd("application/vnd.github+json");
 
             using var response = await _http.SendAsync(request, _serverUpdateCts.Token);
@@ -1161,7 +1161,7 @@ public partial class MainWindow : Window
             ServerUpdateStatusLabel.Text = $"Downloading {asset.Name}...";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, asset.DownloadUrl);
-            request.Headers.UserAgent.ParseAdd("LlamaLink/0.4");
+            request.Headers.UserAgent.ParseAdd("LlamaLink/0.5");
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
             response.EnsureSuccessStatusCode();
 

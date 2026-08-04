@@ -2,7 +2,7 @@
 
 All notable changes to LlamaLink will be documented in this file.
 
-## Unreleased
+## [v0.5.0] - 2026-08-03
 
 - Added an auto-quant recommender that compares local GGUF variants against available VRAM and RAM.
 - Added focused recommender tests and guarded WPF startup initialization.

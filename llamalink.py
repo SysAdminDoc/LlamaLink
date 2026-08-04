@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LlamaLink v0.3.0 - GUI Frontend for llama.cpp
+LlamaLink v0.5.0 - GUI Frontend for llama.cpp
 A simple, versatile chat interface for local LLMs via llama-server.
 """
 
@@ -28,7 +28,7 @@ def _branding_icon_path() -> Path:
 
 
 APP_NAME = "LlamaLink"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.5.0"
 
 def _bootstrap():
     """Auto-install dependencies before imports."""
