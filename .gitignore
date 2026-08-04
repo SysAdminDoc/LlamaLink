@@ -3,6 +3,7 @@ obj/
 dist/
 build-python/
 dist-python/
+dist-arm64/
 *.user
 .vs/
 __pycache__/

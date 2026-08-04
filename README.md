@@ -109,6 +109,12 @@ The spec produces a one-file `dist/LlamaLink.exe`, wires the Qt runtime hook,
 calls `freeze_support()`, and embeds the application icon. The current C#/.NET
 release is built separately with `dotnet publish` as described above.
 
+To produce the self-contained ARM64 Windows build, run:
+
+```bash
+dotnet publish src/LlamaLink.csproj -c Release -r win-arm64 -o dist-arm64 --self-contained true
+```
+
 ## License
 
 MIT

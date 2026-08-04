@@ -28,6 +28,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added an inline Hugging Face model-card viewer with front-matter metadata and bounded Markdown rendering.
 - Completed the legacy PyInstaller one-file path with `freeze_support()`, a Qt runtime hook, and bundled branding assets.
 - Added validated Winget and Chocolatey package metadata for the portable Windows release.
+- Added an overridable ARM64 Windows runtime target with a self-contained publish path.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
