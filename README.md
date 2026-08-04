@@ -58,6 +58,9 @@
 
 Download `LlamaLink.exe` from [Releases](https://github.com/SysAdminDoc/LlamaLink/releases) and run it. No installation required.
 
+Submission-ready package-manager manifests are included under
+`packaging/winget/` and `packaging/chocolatey/`.
+
 ### From Source
 
 ```bash

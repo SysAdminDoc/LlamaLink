@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>llamalink</id>
+    <version>0.4.0</version>
+    <title>LlamaLink</title>
+    <authors>SysAdminDoc</authors>
+    <owners>SysAdminDoc</owners>
+    <projectUrl>https://github.com/SysAdminDoc/LlamaLink</projectUrl>
+    <packageSourceUrl>https://github.com/SysAdminDoc/LlamaLink/tree/master/packaging/chocolatey</packageSourceUrl>
+    <bugTrackerUrl>https://github.com/SysAdminDoc/LlamaLink/issues</bugTrackerUrl>
+    <licenseUrl>https://github.com/SysAdminDoc/LlamaLink/blob/master/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Windows desktop frontend for llama.cpp and compatible local LLM servers. LlamaLink searches and downloads GGUF models, launches or connects to local servers, and provides a streaming chat interface.</description>
+    <summary>Native Windows frontend for local LLMs.</summary>
+    <tags>llama.cpp gguf llm local-ai chat</tags>
+    <releaseNotes>Portable LlamaLink 0.4.0 release.</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

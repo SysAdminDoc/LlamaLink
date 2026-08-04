@@ -1,0 +1,21 @@
+PackageIdentifier: SysAdminDoc.LlamaLink
+PackageVersion: 0.4.0
+PackageLocale: en-US
+Publisher: SysAdminDoc
+PublisherUrl: https://github.com/SysAdminDoc
+PublisherSupportUrl: https://github.com/SysAdminDoc/LlamaLink/issues
+PackageName: LlamaLink
+PackageUrl: https://github.com/SysAdminDoc/LlamaLink
+License: MIT
+LicenseUrl: https://github.com/SysAdminDoc/LlamaLink/blob/master/LICENSE
+ShortDescription: Windows desktop frontend for llama.cpp and compatible local LLM servers.
+Description: Search and download GGUF models from Hugging Face, launch or connect to local LLM servers, and chat with streaming responses from a native Windows desktop app.
+Moniker: llamalink
+Tags:
+- llama.cpp
+- gguf
+- llm
+- local-ai
+- chat
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

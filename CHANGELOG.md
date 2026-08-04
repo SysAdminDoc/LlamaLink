@@ -27,6 +27,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added a prompt inspector with exact request JSON, role transcript, server-template guidance, and approximate token preview.
 - Added an inline Hugging Face model-card viewer with front-matter metadata and bounded Markdown rendering.
 - Completed the legacy PyInstaller one-file path with `freeze_support()`, a Qt runtime hook, and bundled branding assets.
+- Added validated Winget and Chocolatey package metadata for the portable Windows release.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 
