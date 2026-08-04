@@ -62,6 +62,7 @@ public partial class MainWindow : Window
     private long _streamStartTime;
     private TokenProbabilityOptions _activeTokenProbabilityOptions = new(false, 5);
     private bool _activeTokenProbabilityBackendSupports;
+    private int _activePromptTokens;
     private ToolCallAccumulator? _toolCallAccumulator;
     private readonly Queue<ToolCallRequest> _pendingToolCalls = new();
     private readonly List<SystemPromptEntry> _promptEntries = new();
@@ -2108,6 +2109,7 @@ public partial class MainWindow : Window
         var payloadMessages = BuildPayloadMessagesWithRag();
         var toolDefinitions = GetEnabledToolDefinitions();
         var tokenProbabilityOptions = GetTokenProbabilityOptions();
+        _activePromptTokens = PromptInspector.EstimateTokens(PromptInspector.BuildTranscript(payloadMessages));
         var payload = BackendAdapter.BuildPayload(
             backend, model, payloadMessages, temp, topP, topK, repPenalty, maxTokens,
             tools: toolDefinitions, grammar: GetGrammarConstraint(), tokenProbabilities: tokenProbabilityOptions);
@@ -2126,6 +2128,7 @@ public partial class MainWindow : Window
             : _activeTokenProbabilityBackendSupports
                 ? $"Collecting top {_activeTokenProbabilityOptions.ClampedTopK} alternatives..."
                 : "The Ollama API does not expose token probabilities.";
+        CostEstimateLabel.Text = "Energy: estimating...";
         SendBtn.Visibility = Visibility.Collapsed;
         StopGenBtn.Visibility = Visibility.Visible;
         SpeedLabel.Text = "";
@@ -2244,6 +2247,17 @@ public partial class MainWindow : Window
         {
             var tps = _tokenCount / elapsed;
             SpeedLabel.Text = $"{tps:F1} tok/s ({_tokenCount} tokens in {elapsed:F1}s)";
+            if (TryGetCostInputs(out var powerWatts, out var electricityRate))
+            {
+                var estimate = CostEstimator.Calculate(
+                    _activePromptTokens,
+                    _tokenCount,
+                    elapsed,
+                    powerWatts,
+                    electricityRate);
+                CostEstimateLabel.Text = $"Energy: {CostEstimator.Format(estimate)}";
+                CostStatusLabel.Text = $"Last response: {CostEstimator.Format(estimate)} at {tps:F1} tok/s.";
+            }
         }
 
         if (!_activeTokenProbabilityOptions.Enabled)
@@ -2431,6 +2445,7 @@ public partial class MainWindow : Window
         SendBtn.IsEnabled = true;
         StopGenBtn.Visibility = Visibility.Collapsed;
         SpeedLabel.Text = "";
+        CostEstimateLabel.Text = "";
         _toolCallAccumulator = null;
         _pendingToolCalls.Clear();
         ToolConfirmationPanel.Visibility = Visibility.Collapsed;
@@ -3101,6 +3116,41 @@ public partial class MainWindow : Window
     private void LoadGrammarTemplate_Click(object sender, RoutedEventArgs e)
         => GrammarMode_Changed(sender, null!);
 
+    private bool TryGetCostInputs(out double powerWatts, out double electricityRate)
+    {
+        var powerValid = TryParseCapacity(CostPowerWattsBox.Text, out powerWatts) && powerWatts >= 0;
+        var rateValid = TryParseCapacity(CostRateBox.Text, out electricityRate) && electricityRate >= 0;
+        if (!powerValid || !rateValid)
+        {
+            CostStatusLabel.Text = "Enter non-negative power and electricity-rate values.";
+            return false;
+        }
+        return true;
+    }
+
+    private void EstimateCost_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetCostInputs(out var powerWatts, out var electricityRate)) return;
+        if (!int.TryParse(CostForecastTokensBox.Text, out var outputTokens) || outputTokens < 1
+            || !TryParseCapacity(CostForecastTpsBox.Text, out var tokensPerSecond)
+            || tokensPerSecond <= 0)
+        {
+            CostStatusLabel.Text = "Enter positive forecast token and tokens/sec values.";
+            return;
+        }
+
+        var promptTokens = _activePromptTokens > 0
+            ? _activePromptTokens
+            : PromptInspector.EstimateTokens(InputBox.Text);
+        var estimate = CostEstimator.Forecast(
+            promptTokens,
+            Math.Clamp(outputTokens, 1, 1_000_000),
+            tokensPerSecond,
+            powerWatts,
+            electricityRate);
+        CostStatusLabel.Text = $"Forecast: {CostEstimator.Format(estimate)} over {estimate.ElapsedSeconds:F1}s.";
+    }
+
     private void GrammarRule_Selected(object sender, SelectionChangedEventArgs e)
     {
         if (GrammarRuleList.SelectedItem is not GrammarBuilderRule rule) return;
@@ -3549,6 +3599,10 @@ public partial class MainWindow : Window
             TopKBox.Text = GetInt("top_k", 40).ToString();
             RepSlider.Value = GetInt("repeat_penalty", 110);
             MaxTokensBox.Text = GetInt("max_tokens", 2048).ToString();
+            CostPowerWattsBox.Text = GetDouble("cost_power_watts", 150).ToString("0.##", CultureInfo.InvariantCulture);
+            CostRateBox.Text = GetDouble("cost_rate", 0.18).ToString("0.####", CultureInfo.InvariantCulture);
+            CostForecastTokensBox.Text = GetInt("cost_forecast_tokens", 2048).ToString();
+            CostForecastTpsBox.Text = GetDouble("cost_forecast_tps", 20).ToString("0.##", CultureInfo.InvariantCulture);
             SpeculativeCheck.IsChecked = GetBool("speculative_enabled", false);
             DraftModelBox.Text = GetStr("speculative_draft_model");
             DraftGpuLayersBox.Text = GetInt("speculative_draft_gpu_layers", 99).ToString();
@@ -3646,6 +3700,12 @@ public partial class MainWindow : Window
             ["top_k"] = int.TryParse(TopKBox.Text, out var k) ? k : 40,
             ["repeat_penalty"] = (int)RepSlider.Value,
             ["max_tokens"] = int.TryParse(MaxTokensBox.Text, out var m) ? m : 2048,
+            ["cost_power_watts"] = TryParseCapacity(CostPowerWattsBox.Text, out var costPower) ? Math.Max(0, costPower) : 150,
+            ["cost_rate"] = TryParseCapacity(CostRateBox.Text, out var costRate) ? Math.Max(0, costRate) : 0.18,
+            ["cost_forecast_tokens"] = int.TryParse(CostForecastTokensBox.Text, out var costTokens)
+                ? Math.Clamp(costTokens, 1, 1_000_000)
+                : 2048,
+            ["cost_forecast_tps"] = TryParseCapacity(CostForecastTpsBox.Text, out var costTps) ? Math.Max(0.01, costTps) : 20,
             ["speculative_enabled"] = SpeculativeCheck.IsChecked == true,
             ["speculative_draft_model"] = DraftModelBox.Text,
             ["speculative_draft_gpu_layers"] = int.TryParse(DraftGpuLayersBox.Text, out var draftGpuLayers)

@@ -403,6 +403,46 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Cost estimator">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel>
+                                        <Label Content="Power (W)" FontSize="11"/>
+                                        <TextBox x:Name="CostPowerWattsBox" Text="150" Margin="0,2,4,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <Label Content="Rate ($/kWh)" FontSize="11"/>
+                                        <TextBox x:Name="CostRateBox" Text="0.18" Margin="4,2,0,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Margin="0,6,0,0">
+                                        <Label Content="Forecast tokens" FontSize="11"/>
+                                        <TextBox x:Name="CostForecastTokensBox" Text="2048" Margin="0,2,4,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,6,0,0">
+                                        <Label Content="Forecast tok/s" FontSize="11"/>
+                                        <TextBox x:Name="CostForecastTpsBox" Text="20" Margin="4,2,0,0"
+                                                 VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                                <Button Content="Estimate long response" Click="EstimateCost_Click"
+                                        Style="{StaticResource GhostButton}" Padding="9,4" Margin="0,7,0,0"/>
+                                <TextBlock x:Name="CostStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,5,0,0"
+                                           Text="Uses your wattage and electricity rate; it does not read a hardware power sensor."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <GroupBox Header="Speech (optional local tools)">
                             <StackPanel>
                                 <TextBlock Text="Hold Record to capture a 16 kHz mono WAV, then transcribe with whisper.cpp."
@@ -765,6 +805,8 @@
                                                Margin="0,0,8,0"/>
                                     <TextBlock x:Name="TokenCountLabel" Foreground="{StaticResource Overlay0Brush}"
                                                FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock x:Name="CostEstimateLabel" Foreground="{StaticResource Overlay0Brush}"
+                                               FontSize="10" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                     <Button x:Name="StopGenBtn" Content="Stop" Style="{StaticResource RedButton}"
                                             Height="30" Click="StopGen_Click" Visibility="Collapsed" Padding="12,4"/>
                                     <Button x:Name="SendBtn" Style="{StaticResource AccentButton}"
