@@ -34,6 +34,7 @@
     <Compile Include="..\..\src\SpeculativeDecoding.cs" Link="SpeculativeDecoding.cs" />
     <Compile Include="..\..\src\GrammarBuilder.cs" Link="GrammarBuilder.cs" />
     <Compile Include="..\..\src\CostEstimator.cs" Link="CostEstimator.cs" />
+    <Compile Include="..\..\src\ModelPruning.cs" Link="ModelPruning.cs" />
   </ItemGroup>
 
 </Project>

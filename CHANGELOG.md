@@ -32,6 +32,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added guarded speculative decoding controls for a llama.cpp draft model, draft GPU layers, and draft context.
 - Added a validated visual GBNF rule builder that round-trips with the custom grammar editor.
 - Added measured and forecast token-energy estimates using configurable power draw and electricity rate.
+- Added a confirmation-gated model pruning tool that protects active and saved model references.
 
 ## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
 

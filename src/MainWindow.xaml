@@ -146,6 +146,34 @@
                             </StackPanel>
                         </GroupBox>
 
+                        <GroupBox Header="Model pruning">
+                            <StackPanel>
+                                <TextBlock Text="Find GGUF files not referenced by the selected model, draft model, or saved profiles."
+                                           Foreground="{StaticResource Overlay0Brush}" FontSize="11"
+                                           TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="Scan unused" Click="ScanModelPruning_Click"
+                                            Style="{StaticResource GhostButton}" Padding="8,4"/>
+                                    <Button Content="Delete selected" Click="DeleteModelPruning_Click"
+                                            Style="{StaticResource GhostButton}" Foreground="{StaticResource RedBrush}"
+                                            Padding="8,4" Margin="6,0,0,0"/>
+                                </StackPanel>
+                                <ListBox x:Name="ModelPruneList" Height="132" Margin="0,6,0,0"
+                                         ToolTip="Select models to remove after scanning.">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                      Content="{Binding Display}" ToolTip="{Binding FilePath}"
+                                                      Padding="2"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock x:Name="ModelPruneStatusLabel" Foreground="{StaticResource Overlay0Brush}"
+                                           FontSize="11" TextWrapping="Wrap" Margin="2,6,0,0"
+                                           Text="Scan before deleting; the selected model and saved references are protected."/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <!-- ── Auto-quant recommendation ── -->
                         <GroupBox Header="Auto-quant recommendation">
                             <Grid>

@@ -84,6 +84,7 @@ public partial class MainWindow : Window
     private bool _updatingProfiles;
     private PromptInspection? _lastPromptInspection;
     private readonly ObservableCollection<GrammarBuilderRule> _grammarBuilderRules = new();
+    private readonly ObservableCollection<ModelPruneItem> _modelPruneItems = new();
 
     // ── Brushes for chat bubbles ─────────────────────────────────────────
     private static readonly SolidColorBrush UserAccent = new(Color.FromRgb(0x89, 0xB4, 0xFA));
@@ -98,6 +99,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         TokenProbabilityList.ItemsSource = _tokenProbabilityRows;
         GrammarRuleList.ItemsSource = _grammarBuilderRules;
+        ModelPruneList.ItemsSource = _modelPruneItems;
 
         _settingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -281,6 +283,33 @@ public partial class MainWindow : Window
             PromptNameBox.Text = "";
             PromptEditorBox.Text = "";
         }
+    }
+
+    public sealed class ModelPruneItem : INotifyPropertyChanged
+    {
+        private bool _isSelected;
+
+        public ModelPruneItem(ModelPruneCandidate candidate)
+        {
+            Candidate = candidate;
+        }
+
+        public ModelPruneCandidate Candidate { get; }
+        public string Display => $"{Candidate.Name}  —  {Candidate.SizeDisplay}";
+        public string FilePath => Candidate.FilePath;
+
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                if (_isSelected == value) return;
+                _isSelected = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     private void PromptDomain_Changed(object sender, SelectionChangedEventArgs e)
@@ -557,6 +586,125 @@ public partial class MainWindow : Window
             ModelInfoLabel.Text = "";
             QuantRecommendationLabel.Text = "Select a model to compare its local quant variants.";
         }
+    }
+
+    private void ScanModelPruning_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshModelPruning();
+    }
+
+    private void RefreshModelPruning()
+    {
+        _modelPruneItems.Clear();
+        var folder = ModelFolderBox.Text.Trim();
+        if (!Directory.Exists(folder))
+        {
+            ModelPruneStatusLabel.Text = "Choose an existing model folder first.";
+            return;
+        }
+
+        var protectedPaths = GetProtectedModelPaths().ToArray();
+        foreach (var candidate in ModelPruner.FindCandidates(folder, protectedPaths))
+            _modelPruneItems.Add(new ModelPruneItem(candidate));
+
+        ModelPruneStatusLabel.Text = _modelPruneItems.Count == 0
+            ? $"No unused GGUF models found ({protectedPaths.Length} protected reference(s))."
+            : $"{_modelPruneItems.Count} unused model(s) found; protected references: {protectedPaths.Length}.";
+    }
+
+    private void DeleteModelPruning_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = ModelFolderBox.Text.Trim();
+        var selected = _modelPruneItems
+            .Where(item => item.IsSelected)
+            .Select(item => item.Candidate)
+            .ToList();
+        if (selected.Count == 0)
+        {
+            ModelPruneStatusLabel.Text = "Select one or more unused models first.";
+            return;
+        }
+
+        var protectedPaths = GetProtectedModelPaths().ToArray();
+        var safe = selected
+            .Where(candidate => ModelPruner.IsSafeToDelete(folder, candidate.FilePath, protectedPaths))
+            .ToList();
+        if (safe.Count != selected.Count)
+        {
+            ModelPruneStatusLabel.Text = "The selection changed or includes a protected model; scan again.";
+            RefreshModelPruning();
+            return;
+        }
+
+        var totalBytes = safe.Sum(candidate => candidate.SizeBytes);
+        var preview = string.Join(
+            Environment.NewLine,
+            safe.Take(8).Select(candidate => $"• {candidate.Name} ({candidate.SizeDisplay})"));
+        if (safe.Count > 8)
+            preview += $"{Environment.NewLine}• … and {safe.Count - 8} more";
+
+        var result = MessageBox.Show(
+            this,
+            $"Permanently delete {safe.Count} GGUF model(s) and reclaim {FormatModelSize(totalBytes)}?\n\n"
+            + preview
+            + "\n\nThis cannot be undone.",
+            "Confirm model deletion",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        var deleted = 0;
+        var failures = new List<string>();
+        foreach (var candidate in safe)
+        {
+            if (!ModelPruner.IsSafeToDelete(folder, candidate.FilePath, protectedPaths))
+            {
+                failures.Add(candidate.Name);
+                continue;
+            }
+
+            try
+            {
+                File.Delete(candidate.FilePath);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{candidate.Name}: {ex.Message}");
+            }
+        }
+
+        RefreshModels(folder);
+        RefreshModelPruning();
+        ModelPruneStatusLabel.Text = failures.Count == 0
+            ? $"Deleted {deleted} model(s) and reclaimed {FormatModelSize(totalBytes)}."
+            : $"Deleted {deleted} model(s); {failures.Count} could not be deleted.";
+    }
+
+    private IEnumerable<string> GetProtectedModelPaths()
+    {
+        if ((ModelCombo.SelectedItem as ComboBoxItem)?.Tag is string selectedPath)
+            yield return selectedPath;
+        if (!string.IsNullOrWhiteSpace(DraftModelBox.Text))
+            yield return DraftModelBox.Text.Trim();
+        foreach (var profile in _serverProfiles)
+        {
+            if (!string.IsNullOrWhiteSpace(profile.ModelPath))
+                yield return profile.ModelPath;
+        }
+    }
+
+    private static string FormatModelSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024)
+            return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+        if (bytes >= 1024L * 1024)
+            return $"{bytes / (1024.0 * 1024):F1} MB";
+        if (bytes >= 1024)
+            return $"{bytes / 1024.0:F0} KB";
+        return $"{bytes:N0} B";
     }
 
     private void ProfileCombo_Changed(object sender, SelectionChangedEventArgs e)
