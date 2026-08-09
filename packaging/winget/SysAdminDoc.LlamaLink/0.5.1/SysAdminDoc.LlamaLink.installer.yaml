@@ -1,0 +1,12 @@
+PackageIdentifier: SysAdminDoc.LlamaLink
+PackageVersion: 0.5.1
+Installers:
+- Architecture: x64
+  InstallerType: portable
+  InstallerUrl: https://github.com/SysAdminDoc/LlamaLink/releases/download/v0.5.1/LlamaLink.exe
+  InstallerSha256: 2E10CE0081A84FEBA9CE582C591C90F77F33E120124EE3D9B0A25BEC3D84B5DC
+  UpgradeBehavior: install
+  Commands:
+  - LlamaLink
+ManifestType: installer
+ManifestVersion: 1.6.0

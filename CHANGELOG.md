@@ -2,6 +2,10 @@
 
 All notable changes to LlamaLink will be documented in this file.
 
+## [v0.5.1] - 2026-08-09
+
+- Synchronized application, packaging, and documentation version metadata for the maintenance release.
+
 ## [v0.5.0] - 2026-08-03
 
 - Added an auto-quant recommender that compares local GGUF variants against available VRAM and RAM.
@@ -35,7 +39,7 @@ All notable changes to LlamaLink will be documented in this file.
 - Added a confirmation-gated model pruning tool that protects active and saved model references.
 - Added a cancellable LoRA fine-tune kickoff for the local llama.cpp finetune executable.
 
-## [v0.4.0] - %Y->- (HEAD -> master, origin/master)
+## [v0.4.0] - 2026-03-15
 
 - v0.4.0 - C# WPF/.NET 9 rewrite with premium UI
 - Added: Add README, icon, PyInstaller build, CI/CD workflow
